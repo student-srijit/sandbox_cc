@@ -1,0 +1,136 @@
+import json
+import asyncio
+import random
+from typing import Dict, Any
+
+from world_state import manager as ws_manager
+from classifier import classify_attack
+from intelligence import intel_logger
+from llm import generate_response
+from constants import FAKE_ENV_RESPONSE
+
+class HoneypotEngine:
+    """
+    The core deception engine. It analyzes incoming requests, classifies their 
+    intent, manages the World State, and determines whether to respond with 
+    a fast error, a delayed fake, or a deeply generative hallucination based 
+    on the attacker's Threat Tier.
+    """
+    
+    async def handle_request(
+        self, 
+        session_id: str, 
+        payload: str, 
+        headers: dict, 
+        threat_score: int, 
+        tier: str, 
+        ip: str, 
+        ua: str
+    ) -> Dict[str, Any]:
+        """Entrypoint for all JSON-RPC requests."""
+        
+        # 1. Classification & Intelligence Gathering
+        classification = classify_attack(payload, headers)
+        
+        # We only persist detailed OSINT for Tier 3 "Bot Confirmed" attackers
+        if tier == "BOT":
+            # Initializes or fetches the ongoing dossier
+            intel_logger.init_session(session_id, ip, ua, threat_score, tier, classification)
+            
+            # Extract method name gently since payload might be malformed JSON
+            method = "UNKNOWN"
+            try:
+                data = json.loads(payload)
+                if isinstance(data, dict):
+                    method = data.get("method", "UNKNOWN")
+            except: pass
+            
+            intel_logger.record_payload(session_id, method, payload, classification.attack_type)
+
+        # 2. Extract standard JSON-RPC ID for response matching
+        req_id = None
+        try:
+            req_data = json.loads(payload)
+            req_id = req_data.get("id")
+        except:
+            return {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None}
+
+        # 3. Routing by Threat Tier
+        
+        if tier == "HUMAN":
+            # For humans in this demo, we immediately return a realistic failure.
+            # In production, this would proxy pass to a real Infura node.
+            return {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found"}, "id": req_id}
+
+        if tier == "SUSPICIOUS":
+            # The STATIC HONEYPOT.
+            # We delay the response randomly between 800ms and 2000ms.
+            # This causes automated scraping tools to queue up and exhaust their own memory.
+            delay = random.uniform(0.8, 2.0)
+            await asyncio.sleep(delay)
+            
+            # Check if it matches our static library, if not error out
+            from constants import STATIC_RPC_LIBRARY
+            method = req_data.get("method")
+            if method in STATIC_RPC_LIBRARY:
+                return {"jsonrpc": "2.0", "result": STATIC_RPC_LIBRARY[method], "id": req_id}
+            else:
+                return {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found"}, "id": req_id}
+
+        if tier == "BOT":
+            # The GENERATIVE HONEYPOT. 
+            # We initialize their World State sandbox and let LLaMA orchestrate the deception.
+            # Convert 1-100 score to 1-3 tier for world state 
+            ws_tier = 1 if threat_score < 80 else (2 if threat_score < 95 else 3)
+            
+            world_state = ws_manager.get_or_create(session_id, threat_score, ws_tier)
+            world_state.record_action(req_data.get("method", "UNKNOWN"), payload)
+            
+            # Sync any escalations back into the intelligence logger
+            intel_logger.escalate(session_id, world_state.escalation_tier)
+            
+            response = await generate_response(world_state, payload)
+            response["id"] = req_id # Ensure ID always matches regardless of what LLM spit out
+            
+            # NONCE TRACKING DIRECTIVE:
+            # If they actually pushed a transaction through the execution engine logic,
+            # increment the world state nonce so the next prompt builds accurately.
+            method = req_data.get("method", "UNKNOWN")
+            if method == "eth_sendRawTransaction":
+                # Only increment if the LLM successfully generated a hash 
+                tx_hash = response.get("result", "")
+                if isinstance(tx_hash, str) and len(tx_hash) >= 10:
+                    world_state.attacker_nonce += 1
+                    world_state.record_transaction(tx_hash)
+                    print(f"DEBUG: Trapped tx {tx_hash} | Session {session_id} Nonce is now {world_state.attacker_nonce}")
+                    
+            return response
+
+        # Fallback for completely unknown tiers
+        return {"jsonrpc": "2.0", "error": {"code": -32603, "message": "Internal error"}, "id": req_id}
+        
+    async def handle_static_probe(self, path: str, session_id: str, tier: str, ip: str) -> str:
+        """
+        Handles explicit, non-RPC HTTP GET probes like '/.env' or '/admin/config.php'
+        """
+        if ".env" in path.lower():
+            # Let's log this highly suspicious activity if it hasn't been already
+            if tier != "BOT":
+                # We force-register a dossier even if they circumvented the Next.js scoring somehow
+                from models import AttackClassification
+                forced_class = AttackClassification(
+                    attack_type="PATH_TRAVERSAL",
+                    sophistication="script_kiddie",
+                    inferred_toolchain="Unknown/Direct File Request",
+                    confidence=1.0
+                )
+                intel_logger.init_session(session_id, ip, "UNKNOWN", 100, "BOT", forced_class)
+                
+            intel_logger.record_payload(session_id, "GET " + path, "", "PATH_TRAVERSAL")
+            
+            # Serve the dangerously tempting fake credentials
+            return FAKE_ENV_RESPONSE
+            
+        return "Not found"
+
+honeypot_engine = HoneypotEngine()

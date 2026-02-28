@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+aiohttp
+websockets
+PyJWT
+passlib[bcrypt]
+async-timeout
+colorama

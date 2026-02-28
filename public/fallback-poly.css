@@ -1,0 +1,87 @@
+/* ═══════════════════════════════════════════════════════════
+   BHOOL BHULAIYAA — POLYMORPHIC FALLBACK CSS
+   This file acts as the baseline source-of-truth for the 
+   polymorphic CSS generator. The API intercepts this file 
+   and rewrites the selectors dynamically for each session.
+   If decryption fails, it serves this raw file.
+═══════════════════════════════════════════════════════════ */
+
+/* Target 1: connect-wallet-btn */
+.connect-wallet-btn {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 6px;
+    width: 154px;
+    height: 134px;
+    background: none;
+    border: none;
+    cursor: none;
+}
+
+.connect-wallet-btn:hover {
+    transform: scale(1.04);
+}
+
+.connect-wallet-btn:active {
+    transform: scale(0.97);
+}
+
+/* Target 2: shield-status */
+.shield-status {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 16px;
+    border: 1px solid rgba(0, 255, 209, 0.4);
+    background: rgba(10, 10, 20, 0.6);
+    border-radius: 4px;
+}
+
+/* Target 3: threat-feed */
+.threat-feed {
+    position: absolute;
+    top: 64px;
+    bottom: 56px;
+    right: 0;
+    width: 320px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Target 4: nav-logo */
+.nav-logo {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* Target 5: stats-bar */
+.stats-bar {
+    display: flex;
+    height: 100%;
+    width: 100%;
+}
+
+/* Target 6: orbital-ring */
+.orbital-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 255, 209, 0.2);
+}
+
+/* Target 7: hero-section */
+.hero-section {
+    position: fixed;
+    inset: 0;
+    top: 64px;
+    bottom: 56px;
+    left: 0;
+    right: 320px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
