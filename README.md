@@ -91,6 +91,8 @@ Open a **third terminal window** in the root of the project:
 ```bash
 # Run the synthetic traffic generator
 npx ts-node scripts/simulate-attack.ts
+# If the above command shows error try this : 
+TS_NODE_COMPILER_OPTIONS='{"module":"commonjs"}' npx ts-node scripts/simulate-attack.ts
 ```
 
 ---
