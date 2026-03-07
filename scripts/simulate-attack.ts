@@ -122,13 +122,18 @@ async function runAttackSequence() {
 
 // -------------------------------------------------------------
 
+const FAKE_GLOBE_IPS = ['103.28.41.219', '185.220.101.44', '45.148.10.92', '91.132.147.55', '176.111.174.31', '3.8.14.0', '13.238.29.0']
+
 async function attack(name: string, description: string, path: string, headers: Record<string, string>, clientSignals: any) {
     console.log(`[+] INITIATING: ${name}`)
     console.log(`    Type: ${description}`)
 
+    const randomIp = FAKE_GLOBE_IPS[Math.floor(Math.random() * FAKE_GLOBE_IPS.length)]
+    const headersWithIp = { ...headers, 'X-Forwarded-For': randomIp }
+
     try {
         // 1. Hit standard endpoint to trigger HTTP Edge Middleware (Server-Side analysis)
-        const res1 = await fetch(`${API_BASE}${path}`, { headers })
+        const res1 = await fetch(`${API_BASE}${path}`, { headers: headersWithIp })
 
         // Extract HTTP-only cookies injected by middleware
         const setCookieStr = res1.headers.get('set-cookie') || ''
@@ -143,7 +148,7 @@ async function attack(name: string, description: string, path: string, headers: 
         const res2 = await fetch(`${API_BASE}/api/telemetry`, {
             method: 'POST',
             headers: {
-                ...headers,
+                ...headersWithIp,
                 'Content-Type': 'application/json',
                 'Cookie': cookies
             },
@@ -162,9 +167,6 @@ async function attack(name: string, description: string, path: string, headers: 
             // 4. Inject a fake Web3 RPC sequence to trigger the polymorphic honeypot backend
             // We simulate a real MetaMask Drainer sequence so the Trophy Room catches it.
             const sequence = ["eth_chainId", "eth_accounts", "eth_getBalance", "eth_sendTransaction"]
-
-            const FAKE_GLOBE_IPS = ['103.28.41.219', '185.220.101.44', '45.148.10.92', '91.132.147.55', '176.111.174.31', '3.8.14.0', '13.238.29.0']
-            const randomIp = FAKE_GLOBE_IPS[Math.floor(Math.random() * FAKE_GLOBE_IPS.length)]
 
             console.log(`    [*] INJECTING      >> Sending fake payload sequence to backend: [${sequence.join(', ')}] (Simulating IP: ${randomIp})`)
 
@@ -191,8 +193,7 @@ async function attack(name: string, description: string, path: string, headers: 
                         'X-BB-Threat-Score': result.score.toString(),
                         'X-BB-Tier': result.tier,
                         'X-BB-Session': sessionId,
-                        'X-Forwarded-For': randomIp,
-                        ...headers,
+                        ...headersWithIp,
                     },
                     body: JSON.stringify({
                         jsonrpc: "2.0",

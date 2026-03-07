@@ -48,6 +48,8 @@ export async function POST(req: NextRequest) {
                 'X-BB-Session': sessionId,
                 // Forward the attacker's User-Agent for classifier analysis
                 'User-Agent': req.headers.get('user-agent') || 'Unknown',
+                // Forward the originating IP so FastAPI records the real attacker address
+                'X-Forwarded-For': req.headers.get('x-forwarded-for') || req.ip || '127.0.0.1',
             },
             body: body,
             // 15 second timeout to allow LLaMA 3 time to generate a long response
