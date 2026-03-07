@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 import json
 import os
@@ -52,6 +53,30 @@ _ip_bans_lock = threading.Lock()
 
 AUDIT_DIR = Path(__file__).parent / "data"
 AUDIT_LOG_PATH = AUDIT_DIR / "security_audit.log"
+
+
+def _extract_client_ip(request: Request, headers: dict) -> str:
+    """Returns the real client IP, respecting proxy headers only if TRUST_PROXY_HEADERS is enabled."""
+    if TRUST_PROXY_HEADERS:
+        forwarded_for = headers.get("x-forwarded-for", "")
+        if forwarded_for:
+            candidate = forwarded_for.split(",")[0].strip()
+            try:
+                ipaddress.ip_address(candidate)
+                return candidate
+            except ValueError:
+                pass
+        real_ip = headers.get("x-real-ip", "").strip()
+        if real_ip:
+            try:
+                ipaddress.ip_address(real_ip)
+                return real_ip
+            except ValueError:
+                pass
+    client = request.client
+    if client:
+        return client.host
+    return "0.0.0.0"
 
 
 def _audit_event(event_type: str, request: Optional[Request], outcome: str, details: Optional[dict] = None):

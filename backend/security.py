@@ -69,6 +69,7 @@ def decrypt_e2ee_payload(enc_key_b64: str, iv_b64: str, ciphertext_b64: str) -> 
         raise ValueError(f"E2EE Decryption Failed: {e}")
 
 import hmac
+import hashlib
 import time
 import os
 from fastapi import Request, HTTPException

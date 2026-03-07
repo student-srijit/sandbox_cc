@@ -10,3 +10,4 @@ colorama
 reportlab
 pyotp
 qrcode[pil]
+cryptography

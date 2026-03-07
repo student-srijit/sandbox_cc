@@ -30,7 +30,7 @@ export default function HeroSection() {
     return (
         <section
             ref={sectionRef}
-            className="relative flex items-center justify-center overflow-hidden"
+            className="relative flex items-center justify-center overflow-hidden w-full h-full"
         >
             {/* Corner decorators */}
             <div className="corner-decorator corner-tl absolute top-3 left-3" />
@@ -46,13 +46,20 @@ export default function HeroSection() {
             {/* Connect Wallet — sits above maze at center */}
             <div className="flex flex-col items-center gap-6 z-10">
                 <ConnectWallet />
-                <Link
-                    href="/dashboard"
-                    className="group relative px-8 py-3 text-[11px] tracking-[0.35em] uppercase font-bold border-2 border-[#FF2020] text-[#FF2020] bg-[#FF2020]/10 hover:bg-[#FF2020]/25 hover:text-white transition-all shadow-[0_0_20px_rgba(255,32,32,0.3)] hover:shadow-[0_0_35px_rgba(255,32,32,0.55)] animate-pulse"
-                    style={{ animationDuration: '2.5s' }}
-                >
-                    Go to DASHBOARD
-                </Link>
+                <div className="flex items-center gap-3">
+                    <Link
+                        href="/vault"
+                        className="px-6 py-3 text-[11px] tracking-[0.35em] uppercase font-bold border-2 border-[#00FF41] text-[#00FF41] bg-[#00FF41]/10 hover:bg-[#00FF41]/25 hover:text-black transition-all shadow-[0_0_20px_rgba(0,255,65,0.3)]"
+                    >
+                        Launch Vault
+                    </Link>
+                    <Link
+                        href="/ledger"
+                        className="px-6 py-3 text-[11px] tracking-[0.35em] uppercase font-bold border-2 border-[#00FFD1] text-[#00FFD1] bg-[#00FFD1]/10 hover:bg-[#00FFD1]/25 transition-all shadow-[0_0_20px_rgba(0,255,209,0.3)]"
+                    >
+                        Immutable Ledger
+                    </Link>
+                </div>
             </div>
         </section>
     )

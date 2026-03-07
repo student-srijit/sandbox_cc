@@ -13,7 +13,7 @@ export default function Home() {
         <div className="flex-shrink-0">
           <Topbar />
         </div>
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden h-full">
           <HeroSection />
         </div>
       </div>
