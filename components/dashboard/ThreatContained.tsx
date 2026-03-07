@@ -77,7 +77,7 @@ export default function ThreatContained({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 px-4">
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/75 px-4">
       <div className="w-full max-w-3xl border border-[#3a0f16] bg-[linear-gradient(180deg,#0d0809,#090507)] shadow-[0_20px_80px_rgba(0,0,0,0.6)]">
         <div className="flex items-center justify-between border-b border-[#2f1015] px-5 py-3">
           <div>

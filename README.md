@@ -107,6 +107,39 @@ TS_NODE_COMPILER_OPTIONS='{"module":"commonjs"}' npx ts-node scripts/simulate-at
 
 ---
 
+## Test Honeypot:
+
+1. Smoke test
+
+   ```sh
+   python3 test_honeypot_smoke.py
+   ```
+
+   Deterministic checks with pass/fail and exit code.
+
+2. If Ollama not-installed 
+
+   ```sh
+   OLLAMA_MODE=without-ollama OLLAMA_URL=http://127.0.0.1:65535 ./script.sh
+   ```
+
+3. Otherwise
+
+   ```sh
+   OLLAMA_MODE=with-ollama ./script.sh
+   ```
+
+4. Single command (use ollama or fallback)
+   ```sh
+   OLLAMA_MODE=auto ./script.sh
+   ```
+
+   - with-ollama run: shows PASS: with-ollama mode ready and PASS: Ollama model loaded after BOT traffic.
+
+   - without-ollama run: shows fallback mode message and still produces ledger evidence.
+
+   - Both runs print simulated evidence fields (threat_id, attack_type, status_label, evidence_id, content_hash).
+
 ## 🐙 Git Collaboration Flow
 
 If you are working with friends, follow this standard Git flow to push new code to the `sandbox-hackathon` repository without breaking things.

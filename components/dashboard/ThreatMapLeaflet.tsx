@@ -205,7 +205,7 @@ export default function ThreatMapLeaflet() {
         </div>
       </div>
 
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 relative z-0 overflow-hidden">
         <MapContainer
           center={[20, 0]}
           zoom={2}

@@ -3,9 +3,35 @@
 import { useEffect, useRef, useState } from 'react'
 
 const START_NODES = 14_820
-const START_THREATS = 2_341
+const START_THREATS = 0
 const START_BLOCK = 21_847_301
 const NUMBER_FORMATTER = new Intl.NumberFormat('en-US')
+
+type LedgerEntry = {
+    timestamp?: string
+    auto_blocked?: boolean
+    status_label?: string
+}
+
+type LedgerResponse = {
+    ledger?: LedgerEntry[]
+}
+
+function countDeflectedToday(entries: LedgerEntry[]): number {
+    const now = new Date()
+    const startOfDay = new Date(now)
+    startOfDay.setHours(0, 0, 0, 0)
+
+    return entries.reduce((count, entry) => {
+        const blocked = entry.auto_blocked === true || entry.status_label === 'AUTO_BLOCKED'
+        if (!blocked) return count
+
+        const ts = Date.parse(entry.timestamp || '')
+        if (Number.isNaN(ts)) return count
+
+        return ts >= startOfDay.getTime() && ts <= now.getTime() ? count + 1 : count
+    }, 0)
+}
 
 /* ── Animated Counter (simple tween) ─────────────────── */
 function useAnimatedValue(target: number) {
@@ -61,14 +87,21 @@ export default function StatusBar() {
         return () => clearInterval(timerId)
     }, [])
 
-    // Threats: +1 every 15-25 seconds
+    // Threats: real "deflected today" count from the public ledger endpoint.
     useEffect(() => {
-        const tick = () => {
-            setThreats(prev => prev + 1)
-            timerId = setTimeout(tick, (15 + Math.random() * 10) * 1000)
+        const fetchThreats = async () => {
+            try {
+                const res = await fetch('/api/ledger', { cache: 'no-store' })
+                if (!res.ok) return
+                const data = (await res.json()) as LedgerResponse
+                const entries = Array.isArray(data.ledger) ? data.ledger : []
+                setThreats(countDeflectedToday(entries))
+            } catch { }
         }
-        let timerId = setTimeout(tick, 15000 + Math.random() * 10000)
-        return () => clearTimeout(timerId)
+
+        fetchThreats()
+        const timerId = setInterval(fetchThreats, 5000)
+        return () => clearInterval(timerId)
     }, [])
 
     // DOM Mutations: +1 every 4 seconds

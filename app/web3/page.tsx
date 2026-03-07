@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Topbar from "@/components/Topbar";
 import {
   CHAIN_LABEL,
   getContractsForChain,
@@ -17,7 +18,12 @@ function shortAddress(value: string) {
 
 export default function Web3HubPage() {
   return (
-    <main className="min-h-screen bg-[#05070b] px-6 py-10 text-[#eaf4ff]">
+    <div className="h-screen w-full bg-[#05070b] text-[#eaf4ff] flex flex-col overflow-hidden">
+      <div className="h-[64px] flex-shrink-0">
+        <Topbar />
+      </div>
+
+      <main className="flex-1 overflow-y-auto px-6 py-10">
       <section className="mx-auto max-w-6xl">
         <div className="rounded-md border border-[#203046] bg-[linear-gradient(135deg,#091423_0%,#081b16_50%,#0d1829_100%)] p-8 shadow-[0_20px_80px_rgba(0,0,0,0.45)]">
           <p className="text-[11px] tracking-[0.32em] uppercase text-[#7bbcf3]">
@@ -115,6 +121,7 @@ export default function Web3HubPage() {
           })}
         </div>
       </section>
-    </main>
+      </main>
+    </div>
   );
 }
