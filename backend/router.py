@@ -249,7 +249,10 @@ async def handle_rpc(request: Request):
     
     tier = headers.get("x-bb-tier", "UNKNOWN")
     session_id = headers.get("x-bb-session", request.client.host if request.client else "unknown-ip")
-    ip = request.client.host if request.client else "0.0.0.0"
+    # Priority: X-Forwarded-For (for simulation/proxies) > Request Client Host
+    ip = headers.get("x-forwarded-for", request.client.host if request.client else "0.0.0.0")
+    if "," in ip: # Handle multiple proxies
+        ip = ip.split(",")[0].strip()
     ua = headers.get("user-agent", "")
     
     print(f"[HTTP] Inbound POST /api/rpc | Tier: {tier} | Session: {session_id} | IP: {ip}")

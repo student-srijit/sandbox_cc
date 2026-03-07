@@ -162,7 +162,11 @@ async function attack(name: string, description: string, path: string, headers: 
             // 4. Inject a fake Web3 RPC sequence to trigger the polymorphic honeypot backend
             // We simulate a real MetaMask Drainer sequence so the Trophy Room catches it.
             const sequence = ["eth_chainId", "eth_accounts", "eth_getBalance", "eth_sendTransaction"]
-            console.log(`    [*] INJECTING      >> Sending fake payload sequence to backend: [${sequence.join(', ')}]`)
+
+            const FAKE_GLOBE_IPS = ['103.28.41.219', '185.220.101.44', '45.148.10.92', '91.132.147.55', '176.111.174.31', '3.8.14.0', '13.238.29.0']
+            const randomIp = FAKE_GLOBE_IPS[Math.floor(Math.random() * FAKE_GLOBE_IPS.length)]
+
+            console.log(`    [*] INJECTING      >> Sending fake payload sequence to backend: [${sequence.join(', ')}] (Simulating IP: ${randomIp})`)
 
             for (let i = 0; i < sequence.length; i++) {
                 const method = sequence[i]
@@ -185,6 +189,7 @@ async function attack(name: string, description: string, path: string, headers: 
                         'X-BB-Threat-Score': result.score.toString(),
                         'X-BB-Tier': result.tier,
                         'X-BB-Session': 'simulated-session-' + Date.now().toString(),
+                        'X-Forwarded-For': randomIp,
                         ...headers,
                     },
                     body: JSON.stringify({

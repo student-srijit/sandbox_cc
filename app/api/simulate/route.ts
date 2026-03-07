@@ -9,11 +9,20 @@ export async function POST() {
         // 1. Run the trusted Python sequence injector script to bypass Next.js middleware JWT scopes
         await execAsync(`
 cat << 'EOF' > /tmp/sim_trap.py
-import requests, time
+import requests, time, random
 s = requests.Session()
 API_BASE = "http://localhost:8000/api/rpc"
+ips = ['103.28.41.219', '185.220.101.44', '45.148.10.92', '91.132.147.55', '176.111.174.31', '3.8.14.0', '13.238.29.0']
+random_ip = random.choice(ips)
 session_id = f"BB-SIM-{int(time.time())}"
-headers = {"Content-Type": "application/json", "X-BB-Threat-Score": "100", "X-BB-Tier": "BOT", "X-BB-Session": session_id, "User-Agent": "Mozilla/5.0 Playwright"}
+headers = {
+    "Content-Type": "application/json", 
+    "X-BB-Threat-Score": "100", 
+    "X-BB-Tier": "BOT", 
+    "X-BB-Session": session_id, 
+    "X-Forwarded-For": random_ip,
+    "User-Agent": "Mozilla/5.0 Playwright"
+}
 for i, m in enumerate(["eth_chainId", "eth_accounts", "eth_getBalance", "eth_sendTransaction"]):
     params = ["0x1", "latest"] if m == "eth_getBalance" else ([{"from":"0x1", "to":"0x2"}] if m == "eth_sendTransaction" else [])
     s.post(API_BASE, json={"jsonrpc":"2.0","method":m,"params":params,"id":i+1}, headers=headers)
