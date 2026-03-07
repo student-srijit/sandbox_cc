@@ -44,6 +44,29 @@ type DashboardResponse = {
 
 async function getServerToken(): Promise<string | null> {
   if (cachedServerToken && Date.now() < tokenExpiry) return cachedServerToken;
+
+  // Preferred: service account (bypasses TOTP — for internal server-to-server calls)
+  const serviceKey = process.env.BACKEND_SERVICE_KEY;
+  if (serviceKey) {
+    try {
+      const res = await fetch(`${FASTAPI_URL}/api/auth/service-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service_key: serviceKey }),
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      cachedServerToken = data.token ?? null;
+      // Service tokens expire at 30 min — refresh 2 min early
+      tokenExpiry = Date.now() + 28 * 60 * 1000;
+      return cachedServerToken;
+    } catch {
+      return null;
+    }
+  }
+
+  // Legacy fallback: password login (works only when TOTP is disabled)
   const adminUser = process.env.ADMIN_USER;
   const adminPass = process.env.ADMIN_PASS;
   if (!adminUser || !adminPass) {
@@ -93,6 +116,20 @@ export async function GET(request: NextRequest) {
 
     let logs: unknown[] = [];
     let containment: ContainmentStatus | null = null;
+
+    // If we have no user token and no configured server token, do not call
+    // the protected backend endpoint in a loop. Return a clean degraded snapshot.
+    if (!authHeader) {
+      return NextResponse.json({
+        logs,
+        stats,
+        containment,
+        status: "degraded",
+        reason: "missing_admin_service_credentials",
+        generatedAt: new Date().toISOString(),
+      });
+    }
+
     try {
       const apiRes = await fetch(`${FASTAPI_URL}/api/dashboard`, {
         headers: fetchHeaders,

@@ -9,6 +9,9 @@ import time
 import hmac
 import hashlib
 import threading
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
 
 from models import JsonRpcRequest, JsonRpcErrorResponse, JsonRpcError
 from honeypot import honeypot_engine
@@ -28,13 +31,134 @@ INTERNAL_RPC_SHARED_SECRET = (
 )
 INTERNAL_RPC_SIGNATURE_MAX_SKEW_SECONDS = int(os.getenv("INTERNAL_RPC_SIGNATURE_MAX_SKEW_SECONDS", "90"))
 
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "300"))
+LOGIN_RATE_LIMIT_MAX_ATTEMPTS = int(os.getenv("LOGIN_RATE_LIMIT_MAX_ATTEMPTS", "8"))
+ADMIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("ADMIN_RATE_LIMIT_WINDOW_SECONDS", "60"))
+ADMIN_RATE_LIMIT_MAX_REQUESTS = int(os.getenv("ADMIN_RATE_LIMIT_MAX_REQUESTS", "90"))
+RPC_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RPC_RATE_LIMIT_WINDOW_SECONDS", "60"))
+RPC_RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RPC_RATE_LIMIT_MAX_REQUESTS", "180"))
+IP_BAN_THRESHOLD_STRIKES = int(os.getenv("IP_BAN_THRESHOLD_STRIKES", "3"))
+IP_BAN_DURATION_SHORT_SECONDS = int(os.getenv("IP_BAN_DURATION_SHORT_SECONDS", "600"))
+IP_BAN_DURATION_LONG_SECONDS = int(os.getenv("IP_BAN_DURATION_LONG_SECONDS", "3600"))
+TOTP_SECRET = os.getenv("TOTP_SECRET", "")
+BACKEND_SERVICE_KEY = os.getenv("BACKEND_SERVICE_KEY", "")
+
 _seen_rpc_nonces: dict[str, int] = {}
 _seen_rpc_nonces_lock = threading.Lock()
+_rate_buckets: dict[str, list[int]] = {}
+_rate_buckets_lock = threading.Lock()
+_ip_bans: dict[str, float] = {}       # IP -> ban expiry timestamp
+_ip_ban_strikes: dict[str, int] = {}  # IP -> cumulative strike count
+_ip_bans_lock = threading.Lock()
+
+AUDIT_DIR = Path(__file__).parent / "data"
+AUDIT_LOG_PATH = AUDIT_DIR / "security_audit.log"
 
 
-def _unauthorized():
+def _audit_event(event_type: str, request: Optional[Request], outcome: str, details: Optional[dict] = None):
+    """Writes compact JSONL audit events for SOC/SIEM ingestion."""
+    try:
+        AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+        ip = "0.0.0.0"
+        path = ""
+        method = ""
+        ua = ""
+
+        if request is not None:
+            headers = dict(request.headers)
+            ip = _extract_client_ip(request, headers)
+            path = str(request.url.path)
+            method = request.method
+            ua = headers.get("user-agent", "")
+
+        entry = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "event_type": event_type,
+            "outcome": outcome,
+            "ip": ip,
+            "path": path,
+            "method": method,
+            "user_agent": ua[:200],
+            "details": details or {},
+        }
+        with open(AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+    except Exception:
+        # Audit logging should never break request handling.
+        pass
+
+
+def _is_rate_limited(key: str, limit: int, window_seconds: int) -> bool:
+    now = int(time.time())
+    with _rate_buckets_lock:
+        bucket = _rate_buckets.get(key, [])
+        cutoff = now - window_seconds
+        bucket = [ts for ts in bucket if ts >= cutoff]
+        bucket.append(now)
+        _rate_buckets[key] = bucket
+        return len(bucket) > limit
+
+
+def _check_ip_banned(ip: str) -> tuple[bool, float]:
+    """Returns (banned, remaining_seconds). Cleans up expired bans."""
+    now = time.time()
+    with _ip_bans_lock:
+        expiry = _ip_bans.get(ip)
+        if expiry and now < expiry:
+            return True, expiry - now
+        if expiry:
+            _ip_bans.pop(ip, None)
+    return False, 0.0
+
+
+def _ip_ban_auto(request: Optional[Request], ip: str, strikes: int):
+    """Automatically bans an IP based on accumulated strike count."""
+    duration = IP_BAN_DURATION_LONG_SECONDS if strikes >= 10 else IP_BAN_DURATION_SHORT_SECONDS
+    with _ip_bans_lock:
+        _ip_bans[ip] = time.time() + duration
+    _audit_event("ip.banned", request, "denied", {
+        "ip": ip, "strikes": strikes, "ban_duration_seconds": duration
+    })
+
+
+def _check_ip_banned_response(request: Request) -> Optional[JSONResponse]:
+    """Returns a 403 response if the requesting IP is currently banned, else None."""
+    ip = _extract_client_ip(request, dict(request.headers))
+    banned, remaining = _check_ip_banned(ip)
+    if banned:
+        _audit_event("ip.blocked", request, "denied", {"remaining_seconds": round(remaining, 1)})
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Access denied", "retry_after": round(remaining)},
+        )
+    return None
+
+
+def _unauthorized(request: Optional[Request] = None, reason: str = "missing_or_invalid_token"):
     """Returns a proper HTTP 401 so Next.js can detect and propagate auth failures."""
+    _audit_event("admin.auth", request, "denied", {"reason": reason})
     return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+
+def _rate_limited(request: Optional[Request], scope: str):
+    """Records a rate-limit violation, increments fail2ban strike count, and auto-bans repeat offenders."""
+    if request is not None:
+        ip = _extract_client_ip(request, dict(request.headers))
+        with _ip_bans_lock:
+            _ip_ban_strikes[ip] = _ip_ban_strikes.get(ip, 0) + 1
+            strikes = _ip_ban_strikes[ip]
+        if strikes >= IP_BAN_THRESHOLD_STRIKES:
+            _ip_ban_auto(request, ip, strikes)
+    _audit_event("rate.limit", request, "denied", {"scope": scope})
+    return JSONResponse(status_code=429, content={"error": "Rate limit exceeded"})
+
+
+def _enforce_admin_rate_limit(request: Request, scope: str) -> Optional[JSONResponse]:
+    ip = _extract_client_ip(request, dict(request.headers))
+    key = f"admin:{scope}:{ip}"
+    if _is_rate_limited(key, ADMIN_RATE_LIMIT_MAX_REQUESTS, ADMIN_RATE_LIMIT_WINDOW_SECONDS):
+        return _rate_limited(request, scope)
+    return None
 
 
 def _require_bearer(request: Request) -> bool:
@@ -122,6 +246,12 @@ def _verify_internal_rpc_signature(headers: dict, raw_body: bytes, ip: str) -> t
 class LoginRequest(BaseModel):
     username: str
     password: str
+    totp_code: Optional[str] = None
+
+
+class ServiceLoginRequest(BaseModel):
+    service_key: str
+
 
 router = APIRouter()
 
@@ -136,15 +266,103 @@ async def system_status():
     return {"status": "syncing", "highestBlock": "0x125a2fa", "currentBlock": "0x125a2fa"}
 
 @router.post("/api/auth/login")
-async def login(credentials: LoginRequest):
+async def login(credentials: LoginRequest, request: Request):
+    ban_resp = _check_ip_banned_response(request)
+    if ban_resp:
+        return ban_resp
+
+    ip = _extract_client_ip(request, dict(request.headers))
+    login_key = f"login:{ip}"
+    if _is_rate_limited(login_key, LOGIN_RATE_LIMIT_MAX_ATTEMPTS, LOGIN_RATE_LIMIT_WINDOW_SECONDS):
+        return _rate_limited(request, "login")
+
     if credentials.username != ADMIN_USER or not verify_password(credentials.password, ADMIN_PASS_HASH):
-        # Keep consistent JSON-RPC obscure error payload
+        _audit_event(
+            "admin.login",
+            request,
+            "denied",
+            {"reason": "invalid_credentials", "username": credentials.username[:64]},
+        )
         return JsonRpcErrorResponse(
             error=JsonRpcError(code=-32000, message="Unauthorized"), id=None
         )
-    
+
+    # TOTP verification — skipped when TOTP_SECRET is not configured (dev / service accounts)
+    if TOTP_SECRET:
+        if not credentials.totp_code:
+            _audit_event("admin.totp", request, "denied", {"reason": "missing_totp_code"})
+            return JSONResponse(
+                status_code=401,
+                content={"error": "totp_required", "detail": "Authenticator code required"},
+            )
+        try:
+            import pyotp
+            if not pyotp.TOTP(TOTP_SECRET).verify(str(credentials.totp_code), valid_window=1):
+                _audit_event("admin.totp", request, "denied", {"reason": "invalid_totp_code"})
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "invalid_totp", "detail": "Invalid authenticator code"},
+                )
+        except ImportError:
+            pass  # pyotp not installed — skip TOTP check gracefully
+
     token = create_access_token({"sub": credentials.username})
+    _audit_event("admin.login", request, "granted", {"username": credentials.username[:64]})
+    if TOTP_SECRET:
+        _audit_event("admin.totp", request, "granted", {})
     return {"token": token}
+
+
+@router.post("/api/auth/service-login")
+async def service_login(credentials: ServiceLoginRequest, request: Request):
+    """Service-to-service auth — returns a short-lived JWT bypassing TOTP for internal callers."""
+    if not BACKEND_SERVICE_KEY:
+        return JSONResponse(status_code=403, content={"error": "Service accounts not configured"})
+
+    ban_resp = _check_ip_banned_response(request)
+    if ban_resp:
+        return ban_resp
+
+    if not hmac.compare_digest(credentials.service_key, BACKEND_SERVICE_KEY):
+        _audit_event("service.login", request, "denied", {"reason": "invalid_service_key"})
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    token = create_access_token({"sub": "service", "svc": True}, expires_delta_seconds=30 * 60)
+    _audit_event("service.login", request, "granted", {})
+    return {"token": token}
+
+
+@router.get("/api/auth/totp-setup")
+async def totp_setup(request: Request):
+    """Returns TOTP provisioning URI + QR code PNG (base64) for Google Authenticator enrollment."""
+    if not _require_bearer(request):
+        return _unauthorized(request)
+    if not TOTP_SECRET:
+        return JSONResponse(status_code=200, content={
+            "totp_enabled": False,
+            "message": "TOTP not configured. Set TOTP_SECRET env var to enable."
+        })
+    try:
+        import pyotp
+        totp = pyotp.TOTP(TOTP_SECRET)
+        uri = totp.provisioning_uri(name=ADMIN_USER, issuer_name="BhoolBhulaiyaa")
+        qr_b64 = ""
+        try:
+            import qrcode
+            import base64
+            from io import BytesIO
+            qr = qrcode.QRCode(box_size=8, border=2)
+            qr.add_data(uri)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            qr_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+        except ImportError:
+            pass
+        return {"totp_enabled": True, "provisioning_uri": uri, "qr_code": qr_b64}
+    except ImportError:
+        return JSONResponse(status_code=500, content={"error": "pyotp not installed — run: pip install pyotp"})
 
 @router.get("/api/dashboard/public-stats")
 async def get_public_stats():
@@ -153,14 +371,38 @@ async def get_public_stats():
     active_now = len(intel_logger.active_threats)
     return {"active_sessions": active_now}
 
+@router.post("/api/decoy/access")
+async def log_decoy_access(request: Request):
+    """Logs attacker fingerprint when the honeypot /dashboard is accessed. No auth required."""
+    referrer = request.headers.get("referer", "")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    _audit_event("decoy.dashboard.accessed", request, "trap", {
+        "referrer": referrer[:200],
+        "screen": str(body.get("screen", ""))[:200],
+        "navigator_platform": str(body.get("platform", ""))[:200],
+        "languages": str(body.get("languages", ""))[:200],
+        "tz": str(body.get("tz", ""))[:100],
+    })
+    return {"status": "ok"}
+
+
 @router.get("/api/dashboard")
 async def get_dashboard_stats(request: Request):
     """
     Protected endpoint. Requires Bearer token.
     Called by the Next.js frontend to populate the Threat Map.
     """
+    ban_resp = _check_ip_banned_response(request)
+    if ban_resp:
+        return ban_resp
     if not _require_bearer(request):
-        return _unauthorized()
+        return _unauthorized(request)
+    limited = _enforce_admin_rate_limit(request, "dashboard")
+    if limited:
+        return limited
         
     from database import get_recent_threats, get_dashboard_aggregates
     db_logs = get_recent_threats(limit=50)
@@ -210,7 +452,10 @@ async def deploy_active_defense(request: Request, body: DefendRequest):
     Supports legacy modes (TAR_PIT, POISONED_ABI) and new containment playbooks.
     """
     if not _require_bearer(request):
-        return _unauthorized()
+        return _unauthorized(request)
+    limited = _enforce_admin_rate_limit(request, "defend")
+    if limited:
+        return limited
 
     from containment import containment, ContainmentMode
     from world_state import manager as ws_manager
@@ -234,6 +479,13 @@ async def deploy_active_defense(request: Request, body: DefendRequest):
     # Keep legacy world_state map in sync for TAR_PIT and POISONED_ABI
     if mode in (ContainmentMode.TAR_PIT, ContainmentMode.POISONED_ABI):
         ws_manager.deploy_defense(body.ip_address, body.defense_type)
+
+    _audit_event(
+        "admin.defense.deploy",
+        request,
+        "success",
+        {"ip_address": body.ip_address, "mode": mode.value, "threat_id": body.threat_id},
+    )
     
     return {
         "status": "deployed",
@@ -250,7 +502,10 @@ async def get_containment_status(request: Request):
     whether a CRITICAL_INCIDENT has been declared.
     """
     if not _require_bearer(request):
-        return _unauthorized()
+        return _unauthorized(request)
+    limited = _enforce_admin_rate_limit(request, "containment_status")
+    if limited:
+        return limited
 
     from containment import containment
     return containment.get_status()
@@ -262,7 +517,10 @@ async def release_containment(request: Request):
     Protected endpoint. Analyst releases a contained IP (manual override).
     """
     if not _require_bearer(request):
-        return _unauthorized()
+        return _unauthorized(request)
+    limited = _enforce_admin_rate_limit(request, "containment_release")
+    if limited:
+        return limited
 
     body_raw = await request.json()
     ip = body_raw.get("ip_address", "")
@@ -271,6 +529,7 @@ async def release_containment(request: Request):
 
     from containment import containment
     containment.release(ip)
+    _audit_event("admin.containment.release", request, "success", {"ip_address": ip})
     # Also clear critical incident if no more containments
     if not containment.active_containments:
         containment.critical_incident_active = False
@@ -281,7 +540,10 @@ async def release_containment(request: Request):
 async def force_flush(request: Request):
     """Forces the intelligence logger to flush all active dossiers to SQLite."""
     if not _require_bearer(request):
-        return _unauthorized()
+        return _unauthorized(request)
+    limited = _enforce_admin_rate_limit(request, "flush")
+    if limited:
+        return limited
 
     from intelligence import intel_logger
     flushed = []
@@ -290,6 +552,7 @@ async def force_flush(request: Request):
     for sess_id in list(intel_logger.active_threats.keys()):
         intel_logger.finalize_session(sess_id)
         flushed.append(sess_id)
+    _audit_event("admin.flush", request, "success", {"flushed_count": len(flushed)})
         
     return {"status": "ok", "flushed_count": len(flushed)}
 
@@ -307,6 +570,9 @@ async def get_session_replay(request: Request, threat_id: str):
 
     if not _require_bearer(request):
         return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
+    limited = _enforce_admin_rate_limit(request, "replay")
+    if limited:
+        return limited
 
     from database import get_threat_by_id
     record = get_threat_by_id(threat_id)
@@ -387,7 +653,10 @@ async def download_threat_report(request: Request, threat_id: str):
     if not _validate_threat_id(threat_id):
         raise HTTPException(status_code=400, detail="Invalid threat_id format")
     if not _require_bearer(request):
-        return _unauthorized()
+        return _unauthorized(request)
+    limited = _enforce_admin_rate_limit(request, "report")
+    if limited:
+        return limited
     
     from database import get_threat_by_id
     from llm import generate_executive_summary, generate_recommendations
@@ -491,6 +760,10 @@ async def handle_rpc(request: Request):
     The main JSON-RPC endpoint. Evaluates all incoming traffic based 
     on the X-BB-Threat-Score header passed down by the Next.js edge proxies.
     """
+    ban_resp = _check_ip_banned_response(request)
+    if ban_resp:
+        return ban_resp
+
     headers = dict(request.headers)
     raw_body = await request.body()
     
@@ -501,11 +774,21 @@ async def handle_rpc(request: Request):
     
     print(f"[HTTP] Inbound POST /api/rpc | Tier: {tier} | Session: {session_id} | IP: {ip}")
 
+    rpc_key = f"rpc:{ip}"
+    if _is_rate_limited(rpc_key, RPC_RATE_LIMIT_MAX_REQUESTS, RPC_RATE_LIMIT_WINDOW_SECONDS):
+        return _rate_limited(request, "rpc")
+
     signature_ok, signature_reason = _verify_internal_rpc_signature(headers, raw_body, ip)
     if not signature_ok:
         print(
             "[SECURITY] Rejected /api/rpc request | "
             f"reason={signature_reason} ip={ip} tier={tier} ua={ua[:120]}"
+        )
+        _audit_event(
+            "rpc.signature",
+            request,
+            "denied",
+            {"reason": signature_reason, "tier": tier, "session_id": session_id[:120]},
         )
         return JSONResponse(
             status_code=401,
@@ -515,6 +798,13 @@ async def handle_rpc(request: Request):
                 "id": None,
             },
         )
+
+    _audit_event(
+        "rpc.signature",
+        request,
+        "granted",
+        {"tier": tier, "session_id": session_id[:120]},
+    )
     
     try:
         threat_score = int(headers.get("x-bb-threat-score", 0))

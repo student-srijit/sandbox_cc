@@ -13,7 +13,6 @@ export default function Topbar() {
 
   const navItems = [
     { href: "/", label: "HOME" },
-    { href: "/dashboard", label: "WAR ROOM" },
     { href: "/vault", label: "VAULT" },
     { href: "/ledger", label: "LEDGER" },
     { href: "/api-docs", label: "DECOY DOCS" },

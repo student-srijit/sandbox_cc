@@ -7,7 +7,7 @@ from world_state import manager as ws_manager
 from classifier import classify_attack
 from intelligence import intel_logger
 from llm import generate_response
-from constants import FAKE_ENV_RESPONSE
+from constants import FAKE_FILE_RESPONSES
 
 class HoneypotEngine:
     """
@@ -294,7 +294,15 @@ class HoneypotEngine:
         """
         Handles explicit, non-RPC HTTP GET probes like '/.env' or '/admin/config.php'
         """
-        if ".env" in path.lower():
+        normalized_path = path.lower().strip()
+        fake_response = None
+
+        for marker, payload in FAKE_FILE_RESPONSES.items():
+            if marker in normalized_path:
+                fake_response = payload
+                break
+
+        if fake_response is not None:
             # Always ensure a dossier exists so static probes are never dropped from intelligence logs.
             from models import AttackClassification
             forced_class = AttackClassification(
@@ -310,7 +318,7 @@ class HoneypotEngine:
             intel_logger.record_payload(session_id, "GET " + path, "", "PATH_TRAVERSAL")
             
             # Serve the dangerously tempting fake credentials
-            return FAKE_ENV_RESPONSE
+            return fake_response
             
         return "Not found"
 

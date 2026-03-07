@@ -8,3 +8,5 @@ passlib[bcrypt]
 async-timeout
 colorama
 reportlab
+pyotp
+qrcode[pil]
