@@ -45,3 +45,5 @@ backend/backend_test.log
 backend/.env
 
 .env
+
+data/telemetry.json

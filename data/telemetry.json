@@ -5315,5 +5315,31 @@
     "server_breakdown": "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"},{\"check\":\"Server Timing\",\"score\":15,\"reason\":\"Requests arriving consistently faster than 500ms apart.\"}]",
     "client_breakdown": "[{\"check\":\"Mouse Entropy\",\"score\":25,\"reason\":\"Mouse trajectory is artificially perfectly linear.\"},{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"},{\"check\":\"Timing\",\"score\":15,\"reason\":\"First UI interaction happened impossibly fast (<50ms).\"}]",
     "id": "BB-TL-1772884797583-VI1T3CO"
+  },
+  {
+    "timestamp": 1772885195057,
+    "ip_address": "::1",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "session_hash": "7171A2C2A85AD687",
+    "server_score": 0,
+    "client_score": 35,
+    "final_score": 35,
+    "tier": "HUMAN",
+    "server_breakdown": "[]",
+    "client_breakdown": "[{\"check\":\"Mouse Entropy\",\"score\":25,\"reason\":\"Mouse trajectory is artificially perfectly linear.\"},{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"}]",
+    "id": "BB-TL-1772885195057-WYICQ4R"
+  },
+  {
+    "timestamp": 1772885321260,
+    "ip_address": "::1",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "session_hash": "7171A2C2A85AD687",
+    "server_score": 12,
+    "client_score": 35,
+    "final_score": 47,
+    "tier": "SUSPICIOUS",
+    "server_breakdown": "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
+    "client_breakdown": "[{\"check\":\"Mouse Entropy\",\"score\":25,\"reason\":\"Mouse trajectory is artificially perfectly linear.\"},{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"}]",
+    "id": "BB-TL-1772885321261-ZEY5KEG"
   }
 ]
