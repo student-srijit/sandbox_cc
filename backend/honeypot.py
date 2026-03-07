@@ -17,105 +17,6 @@ class HoneypotEngine:
     on the attacker's Threat Tier.
     """
     
-    def _maybe_auto_contain(
-        self,
-        session_id: str,
-        ip: str,
-        tier: str,
-        threat_score: int,
-        attack_type: str,
-    ) -> None:
-        """Automatically deploy containment against high-risk attacker traffic."""
-        if tier != "BOT":
-            return
-
-        from containment import containment, ContainmentMode
-
-        # Do not overwrite an existing manual or automatic containment decision.
-        if containment.get_mode(ip):
-            return
-
-        high_risk_types = {
-            "WALLET_DRAINER",
-            "KEY_EXTRACTION",
-            "EXPLOIT_EXECUTION",
-            "REENTRANCY_PROBE",
-            "SQL_INJECTION",
-            "PATH_TRAVERSAL",
-        }
-        recon_types = {
-            "RPC_ENUMERATION",
-            "CONTRACT_RECON",
-            "BALANCE_RECON",
-            "DATA_SCRAPING",
-            "MEV_BOT_PROBE",
-        }
-
-        record = intel_logger.active_threats.get(session_id)
-        request_count = 0
-        threat_id = None
-        if record:
-            request_count = int(record.timeline.get("total_requests", 0))
-            threat_id = record.threat_id
-
-        if attack_type in high_risk_types:
-            # Strong default: immediately cut dangerous payload streams.
-            mode = (
-                ContainmentMode.QUARANTINE
-                if threat_score >= 90
-                else ContainmentMode.SHADOW_BAN
-            )
-            containment.deploy(
-                ip=ip,
-                mode=mode,
-                threat_id=threat_id,
-                reason=f"AUTO_BLOCK: {attack_type} detected (score={threat_score})",
-            )
-            print(f"[{ip}] AUTO_BLOCK ENGAGED -> {mode.value} ({attack_type})")
-            return
-
-        # Recon bots get tar-pitted after repeated probing.
-        if attack_type in recon_types and request_count >= 6:
-            containment.deploy(
-                ip=ip,
-                mode=ContainmentMode.TAR_PIT,
-                threat_id=threat_id,
-                reason=f"AUTO_BLOCK: persistent {attack_type} reconnaissance",
-            )
-            print(f"[{ip}] AUTO_BLOCK ENGAGED -> TAR_PIT ({attack_type})")
-
-    def _normalize_tier(self, tier: str, threat_score: int, attack_type: str) -> str:
-        """
-        Normalizes incoming tier hints to the engine's supported routing tiers.
-        This keeps direct backend callers and legacy trap routes functional.
-        """
-        normalized = (tier or "").strip().upper()
-        if normalized in {"HUMAN", "SUSPICIOUS", "BOT"}:
-            return normalized
-
-        # Legacy/high-severity aliases used by some frontend trap paths.
-        if normalized in {"EXPLOIT", "MALICIOUS", "ATTACK"}:
-            return "BOT"
-
-        # High-risk intent should never be routed as HUMAN/SUSPICIOUS with missing headers.
-        if attack_type in {
-            "WALLET_DRAINER",
-            "KEY_EXTRACTION",
-            "EXPLOIT_EXECUTION",
-            "REENTRANCY_PROBE",
-            "SQL_INJECTION",
-            "PATH_TRAVERSAL",
-        }:
-            return "BOT"
-
-        # Safety net for clients that omit tier headers but provide score.
-        if threat_score >= 71:
-            return "BOT"
-        if threat_score >= 36:
-            return "SUSPICIOUS"
-
-        return "HUMAN"
-
     async def handle_request(
         self, 
         session_id: str, 
@@ -130,7 +31,6 @@ class HoneypotEngine:
         
         # 1. Classification & Intelligence Gathering
         classification = classify_attack(payload, headers)
-        tier = self._normalize_tier(tier, threat_score, classification.attack_type)
         
         # We only persist detailed OSINT for Tier 3 "Bot Confirmed" attackers
         if tier == "BOT":
@@ -147,15 +47,6 @@ class HoneypotEngine:
             
             intel_logger.record_payload(session_id, method, payload, classification.attack_type)
 
-            # Automatic cyber defense playbook for high-risk traffic.
-            self._maybe_auto_contain(
-                session_id=session_id,
-                ip=ip,
-                tier=tier,
-                threat_score=threat_score,
-                attack_type=classification.attack_type,
-            )
-
         # 1.5 ACTIVE DEFENSE INTERCEPT (THE KILL SWITCHES)
         # --------------------------------------------------------------------
         from containment import containment, ContainmentMode
@@ -167,9 +58,10 @@ class HoneypotEngine:
         if containment_mode == ContainmentMode.TAR_PIT or containment_mode == "TAR_PIT":
             # Tactic: Tarpitting. 
             # We exhaust the attacker's connection pool by intentionally 
-            # hanging their request for 30 seconds before doing anything else.
-            print(f"[{ip}] 🛡️ TAR_PIT ENGAGED. Hanging thread for 30s...")
-            await asyncio.sleep(30.0)
+            # hanging their request using a Reverse Slowloris. We signal the
+            # FastAPI router to switch to a StreamingResponse.
+            print(f"[{ip}] 🛡️ TCP TAR_PIT ENGAGED. Signalling router for StreamingResponse...")
+            return {"_bb_directive": "STREAM_TARPIT"}
 
         elif containment_mode == ContainmentMode.QUARANTINE or containment_mode == "QUARANTINE":
             # Tactic: Complete quarantine.
@@ -287,25 +179,25 @@ class HoneypotEngine:
                     
             return response
 
-        # Fallback safety net. Should be unreachable due tier normalization.
-        return {"jsonrpc": "2.0", "error": {"code": -32601, "message": "Method not found"}, "id": req_id}
+        # Fallback for completely unknown tiers
+        return {"jsonrpc": "2.0", "error": {"code": -32603, "message": "Internal error"}, "id": req_id}
         
     async def handle_static_probe(self, path: str, session_id: str, tier: str, ip: str) -> str:
         """
         Handles explicit, non-RPC HTTP GET probes like '/.env' or '/admin/config.php'
         """
         if ".env" in path.lower():
-            # Always ensure a dossier exists so static probes are never dropped from intelligence logs.
-            from models import AttackClassification
-            forced_class = AttackClassification(
-                attack_type="PATH_TRAVERSAL",
-                sophistication="script_kiddie",
-                inferred_toolchain="Unknown/Direct File Request",
-                confidence=1.0
-            )
-            if session_id not in intel_logger.active_threats:
-                effective_tier = self._normalize_tier(tier, 100, forced_class.attack_type)
-                intel_logger.init_session(session_id, ip, "UNKNOWN", 100, effective_tier, forced_class)
+            # Let's log this highly suspicious activity if it hasn't been already
+            if tier != "BOT":
+                # We force-register a dossier even if they circumvented the Next.js scoring somehow
+                from models import AttackClassification
+                forced_class = AttackClassification(
+                    attack_type="PATH_TRAVERSAL",
+                    sophistication="script_kiddie",
+                    inferred_toolchain="Unknown/Direct File Request",
+                    confidence=1.0
+                )
+                intel_logger.init_session(session_id, ip, "UNKNOWN", 100, "BOT", forced_class)
                 
             intel_logger.record_payload(session_id, "GET " + path, "", "PATH_TRAVERSAL")
             
