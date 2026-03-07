@@ -191,10 +191,13 @@ def _enforce_admin_rate_limit(request: Request, scope: str) -> Optional[JSONResp
 def _require_bearer(request: Request) -> bool:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        raise ValueError("Unauthorized")
+        raise HTTPException(status_code=401, detail="Unauthorized")
         
     token = auth_header.split(" ")[1]
-    payload = verify_token(token)
+    try:
+        payload = verify_token(token)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
     return payload
 
 class LoginRequest(BaseModel):
