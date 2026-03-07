@@ -188,6 +188,50 @@ def _enforce_admin_rate_limit(request: Request, scope: str) -> Optional[JSONResp
     return None
 
 
+def _verify_internal_rpc_signature(headers: dict, body: bytes, ip: str) -> tuple[bool, str]:
+    """
+    Secondary HMAC check for /api/rpc.  Only enforced when the caller explicitly
+    includes X-BB-Nonce (set by app/api/rpc/route.ts).  Direct calls that only
+    carry the outer X-BB-Signature from verify_hmac_signature are passed through —
+    the outer perimeter check already validated the caller.
+    Format: HMAC-SHA256(INTERNAL_RPC_SHARED_SECRET, f"{ts}.{nonce}.{body}")
+    """
+    nonce = headers.get("x-bb-nonce", "")
+    if not nonce:
+        # No nonce → caller used outer HMAC only (simulation tools, service accounts).
+        # The router-level verify_hmac_signature dep already validated the request.
+        return True, "outer_hmac_only"
+
+    if not REQUIRE_INTERNAL_RPC_SIGNATURE:
+        return True, "signature_check_disabled"
+    if not INTERNAL_RPC_SHARED_SECRET:
+        return False, "secret_not_configured"
+
+    timestamp = headers.get("x-bb-timestamp", "")
+    signature = headers.get("x-bb-signature", "")
+
+    if not timestamp or not signature:
+        return False, "missing_signature_headers"
+
+    try:
+        ts_int = int(timestamp)
+        if abs(int(time.time()) - ts_int) > INTERNAL_RPC_SIGNATURE_MAX_SKEW_SECONDS:
+            return False, "timestamp_expired"
+    except ValueError:
+        return False, "invalid_timestamp"
+
+    body_str = body.decode("utf-8") if isinstance(body, bytes) else body
+    payload = f"{timestamp}.{nonce}.{body_str}"
+    expected = hmac.new(
+        INTERNAL_RPC_SHARED_SECRET.encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(expected, signature):
+        return False, "signature_mismatch"
+
+    return True, "ok"
+
+
 def _require_bearer(request: Request) -> bool:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -732,6 +776,7 @@ async def handle_rpc(request: Request):
     if _is_rate_limited(rpc_key, RPC_RATE_LIMIT_MAX_REQUESTS, RPC_RATE_LIMIT_WINDOW_SECONDS):
         return _rate_limited(request, "rpc")
 
+    raw_body = await request.body()
     signature_ok, signature_reason = _verify_internal_rpc_signature(headers, raw_body, ip)
     if not signature_ok:
         print(
@@ -769,7 +814,6 @@ async def handle_rpc(request: Request):
         # We read the raw body rather than using Pydantic here because 
         # attackers often send malformed JSON that crashes strict unmarshallers.
         # We want to catch and log malformed junk, not 422 HTTP error on it.
-        raw_body = await request.body()
         payload_str = raw_body.decode('utf-8')
         
         # Fast fail if it's completely unparseable
