@@ -8,6 +8,10 @@ passlib[bcrypt]
 async-timeout
 colorama
 reportlab
+python-dotenv
+pyotp
+qrcode[pil]
+cryptography
 pyotp
 qrcode[pil]
 cryptography
