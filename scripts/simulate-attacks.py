@@ -77,6 +77,19 @@ def delay(ms: int):
 
 # ── Attack definitions ───────────────────────────────────────────────────────
 
+# Real geolocatable public IPs (diverse global spread — all belonging to major cloud/hosting providers)
+# These will resolve to actual cities via ip-api.com
+ATTACK_IPS = [
+    "45.33.32.156",    # Linode — Newark, USA
+    "185.220.101.47",  # Tor Exit — Germany
+    "103.21.244.0",    # Cloudflare — Singapore
+    "162.142.125.10",  # Censys scanner — USA
+    "194.165.16.77",   # Hosting — Netherlands
+    "91.108.4.1",      # Telegram DC — Amsterdam
+    "5.188.86.172",    # Known scanner — Russia
+    "43.156.67.210",   # Tencent Cloud — China
+]
+
 ATTACKS = [
     {
         "name": "1. SCRIPT KIDDIE — cURL /.env probe",
@@ -84,6 +97,7 @@ ATTACKS = [
         "tier": "BOT",
         "score": 100,
         "path_probed": "/.env",
+        "ip": "45.33.32.156",    # Linode, Newark USA
         "rpc": {"jsonrpc": "2.0", "method": "eth_getBalance", "params": ["0xDEAD", "latest"], "id": 1},
     },
     {
@@ -92,6 +106,7 @@ ATTACKS = [
         "tier": "BOT",
         "score": 95,
         "path_probed": "/api/rpc",
+        "ip": "185.220.101.47",  # Tor Exit, Germany
         "rpc": {
             "jsonrpc": "2.0",
             "method": "eth_sendTransaction",
@@ -105,10 +120,11 @@ ATTACKS = [
         "tier": "BOT",
         "score": 98,
         "path_probed": "/vault",
+        "ip": "103.21.244.0",    # Cloudflare, Singapore
         "rpc": {
             "jsonrpc": "2.0",
             "method": "eth_sendTransaction",
-            "params": [{"from": "0xDrainer", "to": "0xVictimVault", "value": "0x8AC7230489E80000"}],  # 10 ETH
+            "params": [{"from": "0xDrainer", "to": "0xVictimVault", "value": "0x8AC7230489E80000"}],
             "id": 3,
         },
     },
@@ -118,15 +134,40 @@ ATTACKS = [
         "tier": "BOT",
         "score": 100,
         "path_probed": "/admin",
+        "ip": "5.188.86.172",    # Known scanner, Russia
         "rpc": {"jsonrpc": "2.0", "method": "eth_call", "params": [{"to": "0xConfigContract"}, "latest"], "id": 4},
     },
     {
         "name": "5. STEALTH SCRAPER — Spoofed Chrome fingerprint",
         "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36",
-        "tier": "SUSPICIOUS",
-        "score": 72,
+        "tier": "BOT",
+        "score": 78,
         "path_probed": "/ledger",
+        "ip": "43.156.67.210",   # Tencent Cloud, China
         "rpc": {"jsonrpc": "2.0", "method": "eth_getLogs", "params": [{"fromBlock": "0x0", "toBlock": "latest"}], "id": 5},
+    },
+    {
+        "name": "6. DATA SCRAPER — Censys scanner probe",
+        "ua": "Mozilla/5.0 (compatible; CensysInspect/1.1; +https://about.censys.io/)",
+        "tier": "BOT",
+        "score": 92,
+        "path_probed": "/api/rpc",
+        "ip": "162.142.125.10",  # Censys, USA
+        "rpc": {"jsonrpc": "2.0", "method": "net_version", "params": [], "id": 6},
+    },
+    {
+        "name": "7. PROXY ATTACKER — Netherlands hosting node",
+        "ua": "Go-http-client/2.0",
+        "tier": "BOT",
+        "score": 97,
+        "path_probed": "/vault",
+        "ip": "194.165.16.77",   # Hosting, Netherlands
+        "rpc": {
+            "jsonrpc": "2.0",
+            "method": "eth_sendRawTransaction",
+            "params": ["0xf86a8085..."],
+            "id": 7,
+        },
     },
 ]
 
@@ -141,7 +182,7 @@ def run():
 
     for i, atk in enumerate(ATTACKS):
         session_id = f"sim-{int(time.time())}-{random.randint(1000,9999)}"
-        ip = f"10.{random.randint(10,99)}.{random.randint(1,254)}.{random.randint(1,254)}"
+        ip = atk["ip"]  # Use the real geolocatable public IP
 
         print(f"[FIRING] {atk['name']}")
         print(f"         UA     : {atk['ua'][:70]}")
