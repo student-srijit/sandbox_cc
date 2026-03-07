@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-const START_NODES = 14_820
+const START_NODES = 0
 const START_THREATS = 0
 const START_BLOCK = 21_847_301
 const NUMBER_FORMATTER = new Intl.NumberFormat('en-US')

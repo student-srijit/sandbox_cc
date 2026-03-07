@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Request, HTTPException, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
+import gzip
+import io
 import json
+import logging
 import os
 import re
 import ipaddress
@@ -9,9 +12,6 @@ import time
 import hmac
 import hashlib
 import threading
-from pathlib import Path
-from datetime import datetime
-from typing import Optional
 
 from models import JsonRpcRequest, JsonRpcErrorResponse, JsonRpcError
 from honeypot import honeypot_engine
@@ -812,6 +812,152 @@ async def handle_rpc_batch(request: Request):
         id=None
     )
 
+# ---------------------------------------------------------------------------
+# Network-Defense: Diagnostic Stats Endpoint
+# Protected — only accessible with a valid Bearer token.
+# ---------------------------------------------------------------------------
+@router.get("/api/network/stats")
+async def get_network_defense_stats(request: Request):
+    """Returns a live snapshot of the rate-limiter, login-lockout, and scan-detector state."""
+    if not _require_bearer(request):
+        return _unauthorized()
+    from network_defense import get_defense_snapshot
+    return get_defense_snapshot()
+
+# ---------------------------------------------------------------------------
+# Network-Defense: Canary / Honeypot Paths
+# These paths are designed to attract automated scanners and curiosity-driven
+# actors.  Any hit is a guaranteed signal (no legitimate browser user ever
+# navigates here).  Responses look plausible to encourage the attacker to
+# send more requests (giving us more signal), while quietly triggering TAR_PIT.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# GZIP Decompression Bomb
+# Served for file-download canary paths (backup.zip, backup.sql, config, creds).
+# Compresses ~50 MB of fake credential noise down to ~50 KB.
+# When an automated scanner decompresses the response body it allocates 50 MB of
+# RAM and burns CPU time — without causing an OOM crash on any modern machine.
+# Legal note: we are serving content from our own server.  We are NOT injecting
+# into the attacker’s file system or exploiting a vulnerability on their end.
+# ---------------------------------------------------------------------------
+_GZIP_BOMB_PAYLOAD: bytes | None = None
+_GZIP_BOMB_LOCK = threading.Lock()
+
+
+def _build_gzip_bomb() -> bytes:
+    """
+    Generates the compressed payload once (lazy, on first attacker hit).
+    ~50 MB of fake credential data compressed at level 9 → ~40–60 KB on wire.
+    """
+    # Convincing-looking credential noise scanners will try to parse
+    pattern = (
+        "# Production Environment — DO NOT COMMIT\n"
+        "DB_HOST=10.0.0.1\nDB_PORT=5432\nDB_USER=postgres\n"
+        "DB_PASSWORD=Pr0d_S3cr3t_" + "x" * 32 + "\n"
+        "SECRET_KEY=" + "a" * 64 + "\n"
+        "AWS_ACCESS_KEY_ID=AKIA" + "B" * 16 + "\n"
+        "AWS_SECRET_ACCESS_KEY=" + "C" * 40 + "\n\n"
+    ) * 60  # ~360 KB per block
+    raw_bytes = (pattern * 140).encode("utf-8")  # ~50 MB uncompressed
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=9) as gz:
+        gz.write(raw_bytes)
+    compressed = buf.getvalue()
+    _router_logger.info(
+        "gzip bomb ready: %d bytes compressed / ~50 MB decompressed",
+        len(compressed),
+    )
+    return compressed
+
+
+def _get_gzip_bomb() -> bytes:
+    global _GZIP_BOMB_PAYLOAD
+    if _GZIP_BOMB_PAYLOAD is not None:
+        return _GZIP_BOMB_PAYLOAD
+    with _GZIP_BOMB_LOCK:
+        if _GZIP_BOMB_PAYLOAD is None:
+            _GZIP_BOMB_PAYLOAD = _build_gzip_bomb()
+    return _GZIP_BOMB_PAYLOAD
+
+
+_CANARY_PATHS = {
+    "/admin":           {"type": "ADMIN_PANEL",    "fake_hint": "admin"},
+    "/admin/":          {"type": "ADMIN_PANEL",    "fake_hint": "admin"},
+    "/.env":            {"type": "ENV_LEAK",       "fake_hint": "config"},
+    "/.env.local":      {"type": "ENV_LEAK",       "fake_hint": "config"},
+    "/.git/config":     {"type": "GIT_EXPOSURE",   "fake_hint": "git"},
+    "/backup.zip":      {"type": "BACKUP_LEAK",    "fake_hint": "backup"},
+    "/backup.sql":      {"type": "BACKUP_LEAK",    "fake_hint": "backup"},
+    "/phpMyAdmin":      {"type": "PHPMYADMIN",     "fake_hint": "db_admin"},
+    "/phpmyadmin":      {"type": "PHPMYADMIN",     "fake_hint": "db_admin"},
+    "/wp-login.php":    {"type": "WORDPRESS_SCAN", "fake_hint": "wordpress"},
+    "/wp-admin":        {"type": "WORDPRESS_SCAN", "fake_hint": "wordpress"},
+    "/config.json":     {"type": "CONFIG_LEAK",    "fake_hint": "config"},
+    "/credentials.json":{"type": "CRED_LEAK",      "fake_hint": "credentials"},
+    "/server-status":   {"type": "STATUS_PROBE",   "fake_hint": "server_info"},
+    "/.DS_Store":       {"type": "MAC_ARTIFACT",   "fake_hint": "mac_artifact"},
+}
+
+
+async def _handle_canary(full_path: str, request: Request):
+    """
+    Called when a request hits a known-bad canary path.
+    For .env paths, delegates to handle_static_probe (which logs to intelligence).
+    For all other canary paths, directly logs via containment and returns a fake body.
+    """
+    headers = dict(request.headers)
+    ip = _extract_client_ip(request, headers)
+    session_id = headers.get("x-bb-session", ip)
+    norm = f"/{full_path}".rstrip("/") or "/"
+    meta = _CANARY_PATHS.get(norm) or _CANARY_PATHS.get(norm + "/") or {"type": "CANARY_HIT", "fake_hint": "canary"}
+
+    # .env paths already have full intelligence logging inside handle_static_probe
+    if ".env" in norm.lower():
+        result = await honeypot_engine.handle_static_probe(norm, session_id, "BOT", ip)
+        if result and result != "Not found":
+            return Response(content=result.encode(), status_code=200, media_type="text/plain")
+
+    # For all other canary paths, directly trigger containment and serve a fake response
+    from containment import containment, ContainmentMode
+    if not containment.get_mode(ip):
+        import time as _time
+        threat_id = f"canary-{ip.replace('.', '-').replace(':', '-')}-{int(_time.time())}"
+        containment.deploy(
+            ip=ip,
+            mode=ContainmentMode.TAR_PIT,
+            threat_id=threat_id,
+            reason=f"Canary hit: {norm} ({meta['type']})",
+        )
+
+    # File-download paths get the GZIP decompression bomb:
+    # scanner tools auto-decompress the response body, allocating ~50 MB of RAM.
+    if meta["type"] in ("BACKUP_LEAK", "CONFIG_LEAK", "CRED_LEAK"):
+        filename = norm.split("/")[-1] or "data"
+        return Response(
+            content=_get_gzip_bomb(),
+            status_code=200,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Encoding": "gzip",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Geth-Response-Time": "0.003",
+            },
+        )
+
+    # All other canary paths get a small but plausible fake body
+    small_bodies = {
+        "ENV_LEAK":      b"APP_ENV=production\nDB_PASSWORD=\nSECRET_KEY=\n",
+        "GIT_EXPOSURE":  b"[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+        "PHPMYADMIN":    b"<html><title>phpMyAdmin</title><body>Access denied</body></html>\n",
+        "WORDPRESS_SCAN":b"<html><title>WordPress</title><body>Login</body></html>\n",
+        "STATUS_PROBE":  b"Apache Status\nTotal Accesses: 0\n",
+        "MAC_ARTIFACT":  b"\x00\x00\x00\x00",
+    }
+    body = small_bodies.get(meta["type"], b"Access denied.\n")
+    return Response(content=body, status_code=200, media_type="text/plain")
+
+
 @router.get("/{full_path:path}")
 async def catch_all_get(full_path: str, request: Request, response: Response):
     """
@@ -822,20 +968,8 @@ async def catch_all_get(full_path: str, request: Request, response: Response):
     headers = dict(request.headers)
     tier = headers.get("x-bb-tier", "UNKNOWN")
     session_id = headers.get("x-bb-session", request.client.host if request.client else "unknown-ip")
-    ip = request.client.host if request.client else "0.0.0.0"
+    ip = _extract_client_ip(request, headers)
     
-    from containment import containment, ContainmentMode
-    from world_state import manager as ws_manager
-    
-    # 1. Check for Active Defense
-    legacy_weapon = ws_manager.active_defenses.get(ip)
-    containment_mode = containment.get_mode(ip) or legacy_weapon
-    
-    if containment_mode == ContainmentMode.TAR_PIT or containment_mode == "TAR_PIT":
-        print(f"[{ip}] 🛡️ TCP TAR_PIT ENGAGED for GET /{full_path}. Streaming 1 byte / 10s...")
-        return StreamingResponse(tarpit_generator())
-        
-    # 2. Normal processing
     fake_response = await honeypot_engine.handle_static_probe(
         f"/{full_path}", session_id, tier, ip
     )
