@@ -9,8 +9,9 @@ interface Session {
     time: string
     ip: string
     type: string
-    status: 'FEEDING' | 'TRACED' | 'ACTIVE'
+    status: 'OBSERVED' | 'CONTAINED' | 'ACTIVE'
     severity: 'high' | 'medium' | 'low'
+    description: string
 }
 
 interface ThreatApiLog {
@@ -22,9 +23,24 @@ interface ThreatApiLog {
     }
     classification?: {
         attack_type?: string
+        trigger_reason?: string
+        inferred_toolchain?: string
     }
     timeline?: {
         last_active?: number | string
+    }
+}
+
+interface ThreatApiContainment {
+    ip: string
+    mode: string
+    threat_id: string | null
+}
+
+interface ThreatApiResponse {
+    logs?: ThreatApiLog[]
+    containment?: {
+        containments?: ThreatApiContainment[]
     }
 }
 
@@ -44,25 +60,41 @@ export default function HoneypotSessions() {
                     headers: { 'Authorization': `Bearer ${token}` }
                 })
                 if (!res.ok) return
-                const data = await res.json()
+                const data = (await res.json()) as ThreatApiResponse
                 const logs = Array.isArray(data?.logs) ? (data.logs as ThreatApiLog[]) : []
+                const containments = Array.isArray(data?.containment?.containments)
+                    ? data.containment.containments
+                    : []
+                const containedThreatIds = new Set(
+                    containments.map(c => c.threat_id).filter((v): v is string => Boolean(v)),
+                )
+                const containedIps = new Set(containments.map(c => c.ip))
 
                 const validLogs = logs.filter((log) => log.network?.tier !== 'HUMAN')
 
                 const sessionMap = validLogs.map((log) => {
-                    const statusRoll = log.network?.threat_score || 0
-                    const status: Session['status'] = statusRoll > 95 ? 'ACTIVE' : statusRoll > 80 ? 'TRACED' : 'FEEDING'
-                    const severity: Session['severity'] = statusRoll > 90 ? 'high' : 'medium'
+                    const score = log.network?.threat_score || 0
+                    const ip = log.network?.entry_ip || '—'
+                    const isContained = containedThreatIds.has(log.threat_id) || containedIps.has(ip)
+                    const status: Session['status'] = isContained
+                        ? 'CONTAINED'
+                        : log.network?.tier === 'BOT'
+                        ? 'ACTIVE'
+                        : 'OBSERVED'
+                    const severity: Session['severity'] = score >= 90 ? 'high' : score >= 70 ? 'medium' : 'low'
                     const date = new Date(log.timeline?.last_active || Date.now())
                     return {
                         id: log.threat_id,
                         time: date.toLocaleTimeString('en-GB', { hour12: false }),
-                        ip: log.network?.entry_ip || '—',
+                        ip,
                         type: log.classification?.attack_type
                             ? log.classification.attack_type
-                            : log.network?.tier === 'BOT' ? 'BOT_PROBE' : 'SUSPICIOUS_TRAFFIC',
+                            : log.network?.tier === 'BOT' ? 'UNKNOWN_BOT_ACTIVITY' : 'UNKNOWN_ACTIVITY',
                         status,
                         severity,
+                        description:
+                            log.classification?.trigger_reason ||
+                            `Tier=${log.network?.tier || 'UNKNOWN'} Score=${score}`,
                     }
                 })
                 setSessions(sessionMap.slice(0, MAX))
@@ -76,16 +108,16 @@ export default function HoneypotSessions() {
 
     const statusColor = (s: Session['status']) => {
         switch (s) {
-            case 'FEEDING': return '#FFB800'
-            case 'TRACED': return '#00FF41'
+            case 'OBSERVED': return '#FFB800'
+            case 'CONTAINED': return '#00FF41'
             case 'ACTIVE': return '#FF2020'
         }
     }
 
     const statusText = (s: Session['status']) => {
         switch (s) {
-            case 'FEEDING': return 'FEEDING FAKE DATA'
-            case 'TRACED': return 'TRACED ✓'
+            case 'OBSERVED': return 'OBSERVED'
+            case 'CONTAINED': return 'CONTAINED ✓'
             case 'ACTIVE': return 'ACTIVE SESSION'
         }
     }
@@ -136,6 +168,9 @@ export default function HoneypotSessions() {
                         </div>
                     ))}
                 </div>
+            </div>
+            <div className="px-3 py-1.5 border-t border-[#15231d] text-[8px] text-[#6f807a] truncate">
+                {sessions.length > 0 ? sessions[0].description : 'No live threat descriptions yet'}
             </div>
         </div>
 

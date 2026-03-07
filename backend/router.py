@@ -2,15 +2,51 @@ from fastapi import APIRouter, Request, HTTPException, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 import json
+import os
+import re
+import ipaddress
 
 from models import JsonRpcRequest, JsonRpcErrorResponse, JsonRpcError
 from honeypot import honeypot_engine
 from auth import verify_password, create_access_token, verify_token, ADMIN_USER, ADMIN_PASS_HASH
 
+MAX_RPC_BODY_BYTES = int(os.getenv("MAX_RPC_BODY_BYTES", "65536"))
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() == "true"
+THREAT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$")
+
 
 def _unauthorized():
     """Returns a proper HTTP 401 so Next.js can detect and propagate auth failures."""
     return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+
+def _require_bearer(request: Request) -> bool:
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return False
+    token = auth_header.split(" ", 1)[1]
+    try:
+        verify_token(token)
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_threat_id(threat_id: str) -> bool:
+    return bool(THREAT_ID_PATTERN.fullmatch(threat_id or ""))
+
+
+def _extract_client_ip(request: Request, headers: dict) -> str:
+    ip = request.client.host if request.client else "0.0.0.0"
+    if TRUST_PROXY_HEADERS:
+        forwarded = headers.get("x-forwarded-for") or headers.get("x-real-ip")
+        if forwarded:
+            ip = forwarded.split(",")[0].strip()
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        ip = "0.0.0.0"
+    return ip
 
 class LoginRequest(BaseModel):
     username: str
@@ -52,14 +88,7 @@ async def get_dashboard_stats(request: Request):
     Protected endpoint. Requires Bearer token.
     Called by the Next.js frontend to populate the Threat Map.
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return _unauthorized()
-        
-    token = auth_header.split(" ")[1]
-    try:
-        verify_token(token)
-    except ValueError:
+    if not _require_bearer(request):
         return _unauthorized()
         
     from database import get_recent_threats, get_dashboard_aggregates
@@ -109,14 +138,7 @@ async def deploy_active_defense(request: Request, body: DefendRequest):
     Protected endpoint. Deploys a retaliation payload against a specific IP.
     Supports legacy modes (TAR_PIT, POISONED_ABI) and new containment playbooks.
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return _unauthorized()
-        
-    token = auth_header.split(" ")[1]
-    try:
-        verify_token(token)
-    except ValueError:
+    if not _require_bearer(request):
         return _unauthorized()
 
     from containment import containment, ContainmentMode
@@ -156,14 +178,7 @@ async def get_containment_status(request: Request):
     Protected endpoint. Returns all active containment events and
     whether a CRITICAL_INCIDENT has been declared.
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return _unauthorized()
-
-    token = auth_header.split(" ")[1]
-    try:
-        verify_token(token)
-    except ValueError:
+    if not _require_bearer(request):
         return _unauthorized()
 
     from containment import containment
@@ -175,14 +190,7 @@ async def release_containment(request: Request):
     """
     Protected endpoint. Analyst releases a contained IP (manual override).
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return _unauthorized()
-
-    token = auth_header.split(" ")[1]
-    try:
-        verify_token(token)
-    except ValueError:
+    if not _require_bearer(request):
         return _unauthorized()
 
     body_raw = await request.json()
@@ -199,8 +207,11 @@ async def release_containment(request: Request):
     return {"status": "released", "ip": ip}
 
 @router.post("/api/flush")
-async def force_flush():
+async def force_flush(request: Request):
     """Forces the intelligence logger to flush all active dossiers to SQLite."""
+    if not _require_bearer(request):
+        return _unauthorized()
+
     from intelligence import intel_logger
     flushed = []
     
@@ -220,14 +231,10 @@ async def get_session_replay(request: Request, threat_id: str):
     enriched with timing deltas so the frontend can replay the attack step by step.
     Requires Bearer token.
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
+    if not _validate_threat_id(threat_id):
+        raise HTTPException(status_code=400, detail="Invalid threat_id format")
 
-    token = auth_header.split(" ")[1]
-    try:
-        verify_token(token)
-    except ValueError:
+    if not _require_bearer(request):
         return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
 
     from database import get_threat_by_id
@@ -306,10 +313,10 @@ async def download_threat_report(request: Request, threat_id: str):
     Generates and downloads a synthesized PDF Threat Report using 
     Generative AI and the raw session captures.
     """
-    auth_header = request.headers.get("Authorization", "")
-    # In a full production build, we would secure this with the same verify_token
-    # But for ease of debugging/downloading via a standard anchor tag in the 
-    # hackathon demo, we'll allow standard API access.
+    if not _validate_threat_id(threat_id):
+        raise HTTPException(status_code=400, detail="Invalid threat_id format")
+    if not _require_bearer(request):
+        return _unauthorized()
     
     from database import get_threat_by_id
     from llm import generate_executive_summary, generate_recommendations
@@ -417,10 +424,7 @@ async def handle_rpc(request: Request):
     
     tier = headers.get("x-bb-tier", "UNKNOWN")
     session_id = headers.get("x-bb-session", request.client.host if request.client else "unknown-ip")
-    # Priority: X-Forwarded-For (for simulation/proxies) > Request Client Host
-    ip = headers.get("x-forwarded-for", request.client.host if request.client else "0.0.0.0")
-    if "," in ip: # Handle multiple proxies
-        ip = ip.split(",")[0].strip()
+    ip = _extract_client_ip(request, headers)
     ua = headers.get("user-agent", "")
     
     print(f"[HTTP] Inbound POST /api/rpc | Tier: {tier} | Session: {session_id} | IP: {ip}")
@@ -431,10 +435,20 @@ async def handle_rpc(request: Request):
         threat_score = 0
         
     try:
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit() and int(content_length) > MAX_RPC_BODY_BYTES:
+            return JsonRpcErrorResponse(
+                error=JsonRpcError(code=-32600, message="Request too large"), id=None
+            )
+
         # We read the raw body rather than using Pydantic here because 
         # attackers often send malformed JSON that crashes strict unmarshallers.
         # We want to catch and log malformed junk, not 422 HTTP error on it.
         raw_body = await request.body()
+        if len(raw_body) > MAX_RPC_BODY_BYTES:
+            return JsonRpcErrorResponse(
+                error=JsonRpcError(code=-32600, message="Request too large"), id=None
+            )
         payload_str = raw_body.decode('utf-8')
         
         # Fast fail if it's completely unparseable
@@ -480,7 +494,7 @@ async def catch_all_get(full_path: str, request: Request, response: Response):
     headers = dict(request.headers)
     tier = headers.get("x-bb-tier", "UNKNOWN")
     session_id = headers.get("x-bb-session", request.client.host if request.client else "unknown-ip")
-    ip = request.client.host if request.client else "0.0.0.0"
+    ip = _extract_client_ip(request, headers)
     
     fake_response = await honeypot_engine.handle_static_probe(
         f"/{full_path}", session_id, tier, ip

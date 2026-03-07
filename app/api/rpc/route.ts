@@ -2,9 +2,38 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { FASTAPI_URL } from "@/lib/backend-config";
 
+const MAX_RPC_BODY_BYTES = Number(process.env.MAX_RPC_BODY_BYTES || 65536);
+const TRUST_PROXY_HEADERS = String(process.env.TRUST_PROXY_HEADERS || "false").toLowerCase() === "true";
+
+function getClientIp(req: NextRequest): string {
+  const directIp = req.ip;
+  if (directIp) {
+    return directIp;
+  }
+
+  if (TRUST_PROXY_HEADERS) {
+    const forwarded = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip");
+    if (forwarded) {
+      return forwarded.split(",")[0].trim();
+    }
+  }
+
+  return "127.0.0.1";
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.text();
+    if (body.length > MAX_RPC_BODY_BYTES) {
+      return NextResponse.json(
+        {
+          jsonrpc: "2.0",
+          error: { code: -32600, message: "Request too large" },
+          id: null,
+        },
+        { status: 413 },
+      );
+    }
 
     // 1. Extract the BB Telemetry scores from the cookies
     // We set these in the edge middleware and telemetry endpoints
@@ -55,8 +84,7 @@ export async function POST(req: NextRequest) {
         // Forward the attacker's User-Agent for classifier analysis
         "User-Agent": req.headers.get("user-agent") || "Unknown",
         // Forward the originating IP so FastAPI can classify by source.
-        "X-Forwarded-For":
-          req.headers.get("x-forwarded-for") || req.ip || "127.0.0.1",
+        "X-Forwarded-For": getClientIp(req),
       },
       body: body,
       // 15 second timeout to allow LLaMA 3 time to generate a long response

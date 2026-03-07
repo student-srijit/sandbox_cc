@@ -44,6 +44,40 @@ export default function ThreatContained({
 }: ThreatContainedProps) {
   const [details, setDetails] = useState<ReplayPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+
+  async function exportReport() {
+    if (!details?.threat_id || !token || isExporting) {
+      return;
+    }
+
+    try {
+      setIsExporting(true);
+      const res = await fetch(`/api/report/${details.threat_id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        setError("Unable to export report. Authentication or backend failed.");
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `Threat_Intel_Report_${details.threat_id}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Unable to export report. Authentication or backend failed.");
+    } finally {
+      setIsExporting(false);
+    }
+  }
 
   useEffect(() => {
     if (!open || !threatId || !token) {
@@ -177,14 +211,13 @@ export default function ThreatContained({
               </div>
 
               <div className="md:col-span-2 flex gap-2">
-                <a
-                  href={`/api/report/${details.threat_id}`}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  onClick={exportReport}
+                  disabled={isExporting}
                   className="inline-flex items-center justify-center border border-[#2a5f45] bg-[#123423] px-4 py-2 text-[10px] tracking-[0.2em] uppercase text-[#72f1b4] hover:bg-[#18452f]"
                 >
-                  Export Threat Report
-                </a>
+                  {isExporting ? "Exporting..." : "Export Threat Report"}
+                </button>
                 <button
                   onClick={onClose}
                   className="inline-flex items-center justify-center border border-[#3f2328] bg-[#1b0f12] px-4 py-2 text-[10px] tracking-[0.2em] uppercase text-[#d7a2ac] hover:bg-[#281419]"

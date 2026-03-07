@@ -104,7 +104,7 @@ async function fetchExplorerTxs(
   address: string,
   action: "txlist" | "tokentx",
   pageSize: number,
-) {
+): Promise<ExplorerTx[]> {
   if (chain === "celo-sepolia") {
     try {
       if (action === "txlist") {
@@ -120,10 +120,11 @@ async function fetchExplorerTxs(
           return [];
         }
 
-        const data = (await txRes.json()) as BlockscoutListResponse<BlockscoutTx>;
+        const data =
+          (await txRes.json()) as BlockscoutListResponse<BlockscoutTx>;
         const items = Array.isArray(data.items) ? data.items : [];
 
-        return items.slice(0, pageSize).map((item) => {
+        return items.slice(0, pageSize).map<ExplorerTx>((item) => {
           const unixSeconds = item.timestamp
             ? Math.floor(new Date(item.timestamp).getTime() / 1000)
             : 0;
@@ -148,7 +149,7 @@ async function fetchExplorerTxs(
             gasUsed: "0",
             confirmations: "0",
             functionName: item.method || "",
-          } satisfies ExplorerTx;
+          };
         });
       }
 
@@ -168,7 +169,7 @@ async function fetchExplorerTxs(
         (await tokenRes.json()) as BlockscoutListResponse<BlockscoutTokenTransfer>;
       const items = Array.isArray(data.items) ? data.items : [];
 
-      return items.slice(0, pageSize).map((item) => {
+      return items.slice(0, pageSize).map<ExplorerTx>((item) => {
         const unixSeconds = item.timestamp
           ? Math.floor(new Date(item.timestamp).getTime() / 1000)
           : 0;
@@ -197,7 +198,7 @@ async function fetchExplorerTxs(
           tokenSymbol: item.token?.symbol || "TOKEN",
           tokenName: item.token?.symbol || "Token",
           functionName: item.type || "token_transfer",
-        } satisfies ExplorerTx;
+        };
       });
     } catch {
       return [];
