@@ -3,6 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import { FASTAPI_URL } from '@/lib/backend-config'
 
+export const runtime = 'nodejs'
+
 const dataDir = path.join(process.cwd(), 'data')
 const dbPath = path.join(dataDir, 'protected_nodes.json')
 

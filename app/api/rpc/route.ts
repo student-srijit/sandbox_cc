@@ -1,9 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { createHmac, randomBytes } from "crypto";
 import { FASTAPI_URL } from "@/lib/backend-config";
 
 const MAX_RPC_BODY_BYTES = Number(process.env.MAX_RPC_BODY_BYTES || 65536);
 const TRUST_PROXY_HEADERS = String(process.env.TRUST_PROXY_HEADERS || "false").toLowerCase() === "true";
+const REQUIRE_INTERNAL_RPC_SIGNATURE = String(process.env.REQUIRE_INTERNAL_RPC_SIGNATURE || "true").toLowerCase() === "true";
+const DEV_INTERNAL_RPC_SECRET = "bb-internal-rpc-dev-only-change-me";
+const INTERNAL_RPC_SHARED_SECRET = String(
+  process.env.INTERNAL_RPC_SHARED_SECRET ||
+    (process.env.NODE_ENV === "production" ? "" : DEV_INTERNAL_RPC_SECRET),
+);
+
+export const runtime = "nodejs";
+
+function buildInternalRpcAuthHeaders(body: string): Record<string, string> {
+  if (!REQUIRE_INTERNAL_RPC_SIGNATURE) {
+    return {};
+  }
+  if (!INTERNAL_RPC_SHARED_SECRET) {
+    throw new Error("INTERNAL_RPC_SHARED_SECRET is required when REQUIRE_INTERNAL_RPC_SIGNATURE=true");
+  }
+
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const nonce = randomBytes(16).toString("hex");
+  const signature = createHmac("sha256", INTERNAL_RPC_SHARED_SECRET)
+    .update(`${timestamp}.${nonce}.${body}`, "utf8")
+    .digest("hex");
+
+  return {
+    "X-BB-Timestamp": timestamp,
+    "X-BB-Nonce": nonce,
+    "X-BB-Signature": signature,
+  };
+}
 
 function getClientIp(req: NextRequest): string {
   const directIp = req.ip;
@@ -72,6 +102,8 @@ export async function POST(req: NextRequest) {
     const sessionId =
       sessionCookie?.value || req.headers.get("x-bb-session") || "anon-session";
 
+    const internalAuthHeaders = buildInternalRpcAuthHeaders(body);
+
     // 2. Proxy the raw JSON-RPC payload to the Live Python Honeypot
     // Pass the threat intelligence down via custom headers
     const apiRes = await fetch(`${FASTAPI_URL}/api/rpc`, {
@@ -85,6 +117,7 @@ export async function POST(req: NextRequest) {
         "User-Agent": req.headers.get("user-agent") || "Unknown",
         // Forward the originating IP so FastAPI can classify by source.
         "X-Forwarded-For": getClientIp(req),
+        ...internalAuthHeaders,
       },
       body: body,
       // 15 second timeout to allow LLaMA 3 time to generate a long response
@@ -93,6 +126,18 @@ export async function POST(req: NextRequest) {
 
     if (!apiRes.ok) {
       console.error("FastAPI returned error status:", apiRes.status);
+
+      if (apiRes.status === 401 || apiRes.status === 403) {
+        return NextResponse.json(
+          {
+            jsonrpc: "2.0",
+            error: { code: -32000, message: "Unauthorized internal caller" },
+            id: null,
+          },
+          { status: 502 },
+        );
+      }
+
       return NextResponse.json(
         {
           jsonrpc: "2.0",

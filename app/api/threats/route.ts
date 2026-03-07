@@ -3,6 +3,7 @@ import { FASTAPI_URL } from "@/lib/backend-config";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const runtime = "nodejs";
 
 // Server-side token cache — so the public homepage can still fetch real threat data
 // without requiring the user to be logged in.

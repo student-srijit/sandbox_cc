@@ -5,6 +5,10 @@ import json
 import os
 import re
 import ipaddress
+import time
+import hmac
+import hashlib
+import threading
 
 from models import JsonRpcRequest, JsonRpcErrorResponse, JsonRpcError
 from honeypot import honeypot_engine
@@ -13,6 +17,19 @@ from auth import verify_password, create_access_token, verify_token, ADMIN_USER,
 MAX_RPC_BODY_BYTES = int(os.getenv("MAX_RPC_BODY_BYTES", "65536"))
 TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").lower() == "true"
 THREAT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$")
+NONCE_PATTERN = re.compile(r"^[A-Fa-f0-9]{16,128}$")
+
+REQUIRE_INTERNAL_RPC_SIGNATURE = os.getenv("REQUIRE_INTERNAL_RPC_SIGNATURE", "true").lower() == "true"
+DEV_INTERNAL_RPC_SECRET = "bb-internal-rpc-dev-only-change-me"
+INTERNAL_RPC_SHARED_SECRET = (
+    os.getenv("INTERNAL_RPC_SHARED_SECRET")
+    or os.getenv("SECRET_KEY")
+    or ("" if os.getenv("ENV", "development").lower() == "production" else DEV_INTERNAL_RPC_SECRET)
+)
+INTERNAL_RPC_SIGNATURE_MAX_SKEW_SECONDS = int(os.getenv("INTERNAL_RPC_SIGNATURE_MAX_SKEW_SECONDS", "90"))
+
+_seen_rpc_nonces: dict[str, int] = {}
+_seen_rpc_nonces_lock = threading.Lock()
 
 
 def _unauthorized():
@@ -47,6 +64,60 @@ def _extract_client_ip(request: Request, headers: dict) -> str:
     except ValueError:
         ip = "0.0.0.0"
     return ip
+
+
+def _prune_old_nonces(now: int):
+    cutoff = now - INTERNAL_RPC_SIGNATURE_MAX_SKEW_SECONDS
+    stale = [nonce for nonce, ts in _seen_rpc_nonces.items() if ts < cutoff]
+    for nonce in stale:
+        _seen_rpc_nonces.pop(nonce, None)
+
+
+def _verify_internal_rpc_signature(headers: dict, raw_body: bytes, ip: str) -> tuple[bool, str]:
+    if not REQUIRE_INTERNAL_RPC_SIGNATURE:
+        return True, "signature_not_required"
+
+    if not INTERNAL_RPC_SHARED_SECRET:
+        return False, "signature_required_but_secret_missing"
+
+    signature = headers.get("x-bb-signature", "")
+    timestamp_raw = headers.get("x-bb-timestamp", "")
+    nonce = headers.get("x-bb-nonce", "")
+
+    if not signature or not timestamp_raw or not nonce:
+        return False, "missing_signature_headers"
+
+    if not NONCE_PATTERN.fullmatch(nonce):
+        return False, "invalid_nonce_format"
+
+    try:
+        timestamp = int(timestamp_raw)
+    except (TypeError, ValueError):
+        return False, "invalid_timestamp"
+
+    now = int(time.time())
+    if abs(now - timestamp) > INTERNAL_RPC_SIGNATURE_MAX_SKEW_SECONDS:
+        return False, "stale_or_future_timestamp"
+
+    with _seen_rpc_nonces_lock:
+        _prune_old_nonces(now)
+        if nonce in _seen_rpc_nonces:
+            return False, "replay_detected"
+
+    canonical_prefix = f"{timestamp_raw}.{nonce}.".encode("utf-8")
+    expected = hmac.new(
+        INTERNAL_RPC_SHARED_SECRET.encode("utf-8"),
+        canonical_prefix + raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+
+    if not hmac.compare_digest(expected, signature):
+        return False, "invalid_signature"
+
+    with _seen_rpc_nonces_lock:
+        _seen_rpc_nonces[nonce] = now
+
+    return True, "ok"
 
 class LoginRequest(BaseModel):
     username: str
@@ -421,6 +492,7 @@ async def handle_rpc(request: Request):
     on the X-BB-Threat-Score header passed down by the Next.js edge proxies.
     """
     headers = dict(request.headers)
+    raw_body = await request.body()
     
     tier = headers.get("x-bb-tier", "UNKNOWN")
     session_id = headers.get("x-bb-session", request.client.host if request.client else "unknown-ip")
@@ -428,6 +500,21 @@ async def handle_rpc(request: Request):
     ua = headers.get("user-agent", "")
     
     print(f"[HTTP] Inbound POST /api/rpc | Tier: {tier} | Session: {session_id} | IP: {ip}")
+
+    signature_ok, signature_reason = _verify_internal_rpc_signature(headers, raw_body, ip)
+    if not signature_ok:
+        print(
+            "[SECURITY] Rejected /api/rpc request | "
+            f"reason={signature_reason} ip={ip} tier={tier} ua={ua[:120]}"
+        )
+        return JSONResponse(
+            status_code=401,
+            content={
+                "jsonrpc": "2.0",
+                "error": {"code": -32000, "message": "Unauthorized internal caller"},
+                "id": None,
+            },
+        )
     
     try:
         threat_score = int(headers.get("x-bb-threat-score", 0))
@@ -444,7 +531,6 @@ async def handle_rpc(request: Request):
         # We read the raw body rather than using Pydantic here because 
         # attackers often send malformed JSON that crashes strict unmarshallers.
         # We want to catch and log malformed junk, not 422 HTTP error on it.
-        raw_body = await request.body()
         if len(raw_body) > MAX_RPC_BODY_BYTES:
             return JsonRpcErrorResponse(
                 error=JsonRpcError(code=-32600, message="Request too large"), id=None
