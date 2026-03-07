@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { encryptE2EERequest } from "@/lib/security";
 
 /* ═══════════════════════════════════════════════════════════════
    CONTAINMENT PANEL — SOC-Grade Alert Explainability + Playbooks
@@ -150,17 +151,20 @@ function AlertCard({ log, token, onContained }: AlertCardProps) {
   const deployPlaybook = async (mode: string) => {
     setDeploying(true);
     try {
+      const rawPayload = JSON.stringify({
+          ip_address: ip,
+          defense_type: mode,
+          threat_id: log.threat_id,
+      });
+      const encryptedPayload = await encryptE2EERequest(rawPayload);
+      
       const res = await fetch("/api/dashboard/defend", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          ip_address: ip,
-          defense_type: mode,
-          threat_id: log.threat_id,
-        }),
+        body: JSON.stringify({ e2ee_payload: encryptedPayload }),
       });
       if (res.ok) {
         setDeployed(mode);
@@ -314,13 +318,16 @@ export default function ContainmentPanel({
       if (!token) return;
       setReleasing(ip);
       try {
+        const rawPayload = JSON.stringify({ ip_address: ip });
+        const encryptedPayload = await encryptE2EERequest(rawPayload);
+        
         await fetch("/api/dashboard/defend", {
           method: "DELETE",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ ip_address: ip }),
+          body: JSON.stringify({ e2ee_payload: encryptedPayload }),
         });
         onRefresh();
       } catch {}

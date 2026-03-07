@@ -1,6 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { cookies } from "next/headers";
-import { FASTAPI_URL } from "@/lib/backend-config";
+import { FASTAPI_URL, fetchFastAPI } from "@/lib/backend-config";
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
       id: Date.now(),
     };
 
-    const res = await fetch(`${FASTAPI_URL}/api/rpc`, {
+    const res = await fetchFastAPI(`/api/rpc`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
 
     // Force immediate flush to SQLite so it appears on dashboard
     if (body.severity === "EXPLOIT") {
-      fetch(`${FASTAPI_URL}/api/flush`, { method: "POST" }).catch(() => {});
+      fetchFastAPI(`/api/flush`, { method: "POST" }).catch(() => {});
     }
 
     if (!res.ok) {

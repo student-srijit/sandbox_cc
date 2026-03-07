@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { FASTAPI_URL } from "@/lib/backend-config";
+import { FASTAPI_URL, fetchFastAPI } from "@/lib/backend-config";
 
 export async function POST(req: Request) {
   try {
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
 
     // We bypass the Next.js middleware and funnel directly into the Python RPC engine
     // ensuring the attacker is instantly flagged as completely hostile.
-    const res = await fetch(`${FASTAPI_URL}/api/rpc`, {
+    const res = await fetchFastAPI(`/api/rpc`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
 
     // Force flush to SQLite immediately since the vault interaction is usually brief
     // compared to a 30-minute scraping script
-    await fetch(`${FASTAPI_URL}/api/flush`, { method: "POST" });
+    await fetchFastAPI(`/api/flush`, { method: "POST" });
 
     if (!res.ok) {
       return NextResponse.json(

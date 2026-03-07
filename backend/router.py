@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Request, HTTPException, Response
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 import json
 import os
@@ -164,84 +163,19 @@ def _enforce_admin_rate_limit(request: Request, scope: str) -> Optional[JSONResp
 def _require_bearer(request: Request) -> bool:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        return False
-    token = auth_header.split(" ", 1)[1]
-    try:
-        verify_token(token)
-        return True
-    except ValueError:
-        return False
-
-
-def _validate_threat_id(threat_id: str) -> bool:
-    return bool(THREAT_ID_PATTERN.fullmatch(threat_id or ""))
-
-
-def _extract_client_ip(request: Request, headers: dict) -> str:
-    ip = request.client.host if request.client else "0.0.0.0"
-    if TRUST_PROXY_HEADERS:
-        forwarded = headers.get("x-forwarded-for") or headers.get("x-real-ip")
-        if forwarded:
-            ip = forwarded.split(",")[0].strip()
-    try:
-        ipaddress.ip_address(ip)
-    except ValueError:
-        ip = "0.0.0.0"
-    return ip
-
-
-def _prune_old_nonces(now: int):
-    cutoff = now - INTERNAL_RPC_SIGNATURE_MAX_SKEW_SECONDS
-    stale = [nonce for nonce, ts in _seen_rpc_nonces.items() if ts < cutoff]
-    for nonce in stale:
-        _seen_rpc_nonces.pop(nonce, None)
-
-
-def _verify_internal_rpc_signature(headers: dict, raw_body: bytes, ip: str) -> tuple[bool, str]:
-    if not REQUIRE_INTERNAL_RPC_SIGNATURE:
-        return True, "signature_not_required"
-
-    if not INTERNAL_RPC_SHARED_SECRET:
-        return False, "signature_required_but_secret_missing"
-
-    signature = headers.get("x-bb-signature", "")
-    timestamp_raw = headers.get("x-bb-timestamp", "")
-    nonce = headers.get("x-bb-nonce", "")
-
-    if not signature or not timestamp_raw or not nonce:
-        return False, "missing_signature_headers"
-
-    if not NONCE_PATTERN.fullmatch(nonce):
-        return False, "invalid_nonce_format"
-
-    try:
-        timestamp = int(timestamp_raw)
-    except (TypeError, ValueError):
-        return False, "invalid_timestamp"
-
-    now = int(time.time())
-    if abs(now - timestamp) > INTERNAL_RPC_SIGNATURE_MAX_SKEW_SECONDS:
-        return False, "stale_or_future_timestamp"
-
-    with _seen_rpc_nonces_lock:
-        _prune_old_nonces(now)
-        if nonce in _seen_rpc_nonces:
-            return False, "replay_detected"
-
-    canonical_prefix = f"{timestamp_raw}.{nonce}.".encode("utf-8")
-    expected = hmac.new(
-        INTERNAL_RPC_SHARED_SECRET.encode("utf-8"),
-        canonical_prefix + raw_body,
-        hashlib.sha256,
-    ).hexdigest()
-
-    if not hmac.compare_digest(expected, signature):
-        return False, "invalid_signature"
-
-    with _seen_rpc_nonces_lock:
-        _seen_rpc_nonces[nonce] = now
-
-    return True, "ok"
+        raise ValueError("Unauthorized")
+        
+    token = auth_header.split(" ")[1]
+    payload = verify_token(token)
+    
+    # Double-Submit CSRF Verification
+    expected_csrf = payload.get("csrf_token")
+    cookie_csrf = request.cookies.get("bb_csrf_token")
+    
+    if not expected_csrf or not cookie_csrf or expected_csrf != cookie_csrf:
+        raise ValueError("CSRF Check Failed")
+        
+    return payload
 
 class LoginRequest(BaseModel):
     username: str
@@ -253,7 +187,19 @@ class ServiceLoginRequest(BaseModel):
     service_key: str
 
 
-router = APIRouter()
+from security import decrypt_e2ee_payload, verify_hmac_signature
+from fastapi import APIRouter, Depends
+
+class E2EEPayload(BaseModel):
+    enc_key: str
+    iv: str
+    ciphertext: str
+
+class E2EEWrapper(BaseModel):
+    e2ee_payload: E2EEPayload
+
+# Enforce the Edge-only HMAC signature validation on all endpoints globally
+router = APIRouter(dependencies=[Depends(verify_hmac_signature)])
 
 @router.get("/api/health")
 async def health_check():
@@ -392,7 +338,7 @@ async def log_decoy_access(request: Request):
 @router.get("/api/dashboard")
 async def get_dashboard_stats(request: Request):
     """
-    Protected endpoint. Requires Bearer token.
+    Protected endpoint. Requires Bearer token + CSRF Cookie.
     Called by the Next.js frontend to populate the Threat Map.
     """
     ban_resp = _check_ip_banned_response(request)
@@ -446,7 +392,7 @@ class DefendRequest(BaseModel):
     threat_id: str | None = None  # Optional: associate containment with a specific threat record
 
 @router.post("/api/dashboard/defend")
-async def deploy_active_defense(request: Request, body: DefendRequest):
+async def deploy_active_defense(request: Request, wrapper: E2EEWrapper):
     """
     Protected endpoint. Deploys a retaliation payload against a specific IP.
     Supports legacy modes (TAR_PIT, POISONED_ABI) and new containment playbooks.
@@ -512,7 +458,7 @@ async def get_containment_status(request: Request):
 
 
 @router.post("/api/containment/release")
-async def release_containment(request: Request):
+async def release_containment(request: Request, wrapper: E2EEWrapper):
     """
     Protected endpoint. Analyst releases a contained IP (manual override).
     """
@@ -522,7 +468,6 @@ async def release_containment(request: Request):
     if limited:
         return limited
 
-    body_raw = await request.json()
     ip = body_raw.get("ip_address", "")
     if not ip:
         return {"status": "error", "detail": "ip_address required"}
@@ -537,7 +482,7 @@ async def release_containment(request: Request):
     return {"status": "released", "ip": ip}
 
 @router.post("/api/flush")
-async def force_flush(request: Request):
+async def force_flush():
     """Forces the intelligence logger to flush all active dossiers to SQLite."""
     if not _require_bearer(request):
         return _unauthorized(request)
@@ -557,18 +502,46 @@ async def force_flush(request: Request):
     return {"status": "ok", "flushed_count": len(flushed)}
 
 from fastapi.responses import StreamingResponse
+import asyncio
+import logging
+
+logger = logging.getLogger("containment")
+
+async def tarpit_generator():
+    """
+    Reverse Slowloris Tarpit.
+    Accepts the TCP connection and drip-feeds 1 byte every 10 seconds forever.
+    Designed to exhaust automated scanners' thread pools.
+    """
+    try:
+        # We start with a 200 OK header to keep the scanner hopeful
+        yield b"HTTP/1.1 200 OK\r\n"
+        yield b"Content-Type: text/plain\r\n"
+        yield b"Connection: keep-alive\r\n\r\n"
+        
+        while True:
+            # Drip feed exactly 1 byte of garbage data every 10 seconds
+            # so the socket remains active and the scanner doesn't time out
+            yield b"\x00" 
+            await asyncio.sleep(10.0)
+    except asyncio.CancelledError:
+        # Happens when the client finally gives up and kills the connection
+        logger.info("[TARPIT] Scanner finally dropped connection.")
+        raise
+    except Exception as e:
+        logger.error(f"[TARPIT] Error: {e}")
+        pass
 
 @router.get("/api/replay/{threat_id}")
 async def get_session_replay(request: Request, threat_id: str):
     """
     Returns the ordered sequence of RPC payloads for a given threat session,
     enriched with timing deltas so the frontend can replay the attack step by step.
-    Requires Bearer token.
+    Requires Bearer token + CSRF Cookie.
     """
-    if not _validate_threat_id(threat_id):
-        raise HTTPException(status_code=400, detail="Invalid threat_id format")
-
-    if not _require_bearer(request):
+    try:
+        verify_auth_and_csrf(request)
+    except ValueError:
         return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
     limited = _enforce_admin_rate_limit(request, "replay")
     if limited:
@@ -688,68 +661,27 @@ import hashlib
 async def get_public_ledger():
     """
     Public endpoint for the Immutable Threat Ledger.
-    Returns anonymized threat data and stable evidence hashes.
+    Returns anonymized threat data and SHA-256 hashes simulating blockchain TXs.
     """
     from database import get_recent_threats
-    from containment import containment
     logs = get_recent_threats(limit=100)
     
     ledger_entries = []
     for log in logs:
         timeline = log.get("timeline", {})
         ts = timeline.get("first_seen", "Unknown")
-        threat_id = log.get("threat_id", "UNKNOWN")
-        entry_ip = log.get("network", {}).get("entry_ip", "0.0.0.0")
-        tier = log.get("network", {}).get("tier", "UNKNOWN")
-        attack_type = log.get("classification", {}).get("attack_type", "UNKNOWN")
-        confidence = float(log.get("classification", {}).get("confidence", 0.0) or 0.0)
-        toolchain = log.get("classification", {}).get("inferred_toolchain", "Unknown")
-        payloads = log.get("payloads", [])
-        containment_mode = containment.get_mode(entry_ip)
-        containment_event = containment.active_containments.get(entry_ip, {})
-
-        is_attack = tier in {"BOT", "SUSPICIOUS"} or attack_type not in {"UNKNOWN", "BENIGN"}
-        record_type = "ATTACK" if is_attack else "REAL_TRANSACTION"
-        auto_blocked = bool(containment_mode) and is_attack
-        status_label = (
-            "AUTO_BLOCKED"
-            if auto_blocked
-            else ("ATTACK_DETECTED" if is_attack else "REAL_TRANSACTION")
-        )
-
-        # Build a canonical immutable payload so the content hash remains stable
-        # across API reloads and minor backend shape changes.
-        canonical_payload = {
-            "threat_id": threat_id,
-            "timestamp": ts,
-            "ip": entry_ip,
-            "tier": tier,
-            "toolchain": toolchain,
-            "payload_methods": [p.get("method", "") for p in payloads],
-            "request_count": timeline.get("total_requests", len(payloads)),
-        }
         
-        raw_json = json.dumps(canonical_payload, sort_keys=True)
-        content_hash = "0x" + hashlib.sha256(raw_json.encode('utf-8')).hexdigest()
-        evidence_id = "EV-" + hashlib.sha256(f"{threat_id}:{content_hash}".encode('utf-8')).hexdigest()[:20].upper()
+        # Hash the entire raw JSON to simulate an immutable CID/TxHash
+        raw_json = json.dumps(log, sort_keys=True)
+        tx_hash = "0x" + hashlib.sha256(raw_json.encode('utf-8')).hexdigest()
         
         ledger_entries.append({
-            "threat_id": threat_id,
+            "threat_id": log.get("threat_id", "UNKNOWN"),
             "timestamp": ts,
-            "ip": entry_ip,
-            "tier": tier,
-            "toolchain": toolchain,
-            "attack_type": attack_type,
-            "confidence": round(confidence, 3),
-            "record_type": record_type,
-            "auto_blocked": auto_blocked,
-            "containment_mode": containment_mode,
-            "containment_reason": containment_event.get("reason", ""),
-            "status_label": status_label,
-            "content_hash": content_hash,
-            # Keep backward compatibility for existing frontend field name.
-            "tx_hash": content_hash,
-            "evidence_id": evidence_id,
+            "ip": log.get("network", {}).get("entry_ip", "0.0.0.0"),
+            "tier": log.get("network", {}).get("tier", "UNKNOWN"),
+            "toolchain": log.get("classification", {}).get("inferred_toolchain", "Unknown"),
+            "tx_hash": tx_hash
         })
         
     return {"ledger": ledger_entries}
@@ -765,11 +697,10 @@ async def handle_rpc(request: Request):
         return ban_resp
 
     headers = dict(request.headers)
-    raw_body = await request.body()
     
     tier = headers.get("x-bb-tier", "UNKNOWN")
     session_id = headers.get("x-bb-session", request.client.host if request.client else "unknown-ip")
-    ip = _extract_client_ip(request, headers)
+    ip = request.client.host if request.client else "0.0.0.0"
     ua = headers.get("user-agent", "")
     
     print(f"[HTTP] Inbound POST /api/rpc | Tier: {tier} | Session: {session_id} | IP: {ip}")
@@ -812,19 +743,10 @@ async def handle_rpc(request: Request):
         threat_score = 0
         
     try:
-        content_length = request.headers.get("content-length")
-        if content_length and content_length.isdigit() and int(content_length) > MAX_RPC_BODY_BYTES:
-            return JsonRpcErrorResponse(
-                error=JsonRpcError(code=-32600, message="Request too large"), id=None
-            )
-
         # We read the raw body rather than using Pydantic here because 
         # attackers often send malformed JSON that crashes strict unmarshallers.
         # We want to catch and log malformed junk, not 422 HTTP error on it.
-        if len(raw_body) > MAX_RPC_BODY_BYTES:
-            return JsonRpcErrorResponse(
-                error=JsonRpcError(code=-32600, message="Request too large"), id=None
-            )
+        raw_body = await request.body()
         payload_str = raw_body.decode('utf-8')
         
         # Fast fail if it's completely unparseable
@@ -844,6 +766,10 @@ async def handle_rpc(request: Request):
             ua=ua
         )
         
+        # Intercept the Streaming Tarpit Directive
+        if response.get("_bb_directive") == "STREAM_TARPIT":
+            return StreamingResponse(tarpit_generator())
+            
         return response
         
     except Exception as e:
@@ -865,13 +791,26 @@ async def handle_rpc_batch(request: Request):
 async def catch_all_get(full_path: str, request: Request, response: Response):
     """
     Catches ALL non-RPC requests like `/.env` or `/admin` 
-    and checks if they are known attack probes.
+    and checks if they are known attack probes. We also
+    check for active active-defenses for scanners.
     """
     headers = dict(request.headers)
     tier = headers.get("x-bb-tier", "UNKNOWN")
     session_id = headers.get("x-bb-session", request.client.host if request.client else "unknown-ip")
-    ip = _extract_client_ip(request, headers)
+    ip = request.client.host if request.client else "0.0.0.0"
     
+    from containment import containment, ContainmentMode
+    from world_state import manager as ws_manager
+    
+    # 1. Check for Active Defense
+    legacy_weapon = ws_manager.active_defenses.get(ip)
+    containment_mode = containment.get_mode(ip) or legacy_weapon
+    
+    if containment_mode == ContainmentMode.TAR_PIT or containment_mode == "TAR_PIT":
+        print(f"[{ip}] 🛡️ TCP TAR_PIT ENGAGED for GET /{full_path}. Streaming 1 byte / 10s...")
+        return StreamingResponse(tarpit_generator())
+        
+    # 2. Normal processing
     fake_response = await honeypot_engine.handle_static_probe(
         f"/{full_path}", session_id, tier, ip
     )

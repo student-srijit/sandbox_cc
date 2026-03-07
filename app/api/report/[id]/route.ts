@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FASTAPI_URL } from "@/lib/backend-config";
+import { FASTAPI_URL, fetchFastAPI } from "@/lib/backend-config";
 
 const THREAT_ID_REGEX = /^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$/;
 
@@ -10,6 +10,7 @@ export async function GET(
   try {
     const threatId = params.id;
     const authHeader = request.headers.get("authorization") || "";
+    const csrfCookie = request.cookies.get("bb_csrf_token");
 
     if (!authHeader.startsWith("Bearer ")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -17,12 +18,15 @@ export async function GET(
     if (!THREAT_ID_REGEX.test(threatId)) {
       return NextResponse.json({ error: "Invalid threat id" }, { status: 400 });
     }
+    
+    const headers: Record<string, string> = { Authorization: authHeader };
+    if (csrfCookie) {
+      headers["Cookie"] = `bb_csrf_token=${csrfCookie.value}`;
+    }
 
-    const apiRes = await fetch(`${FASTAPI_URL}/api/report/${threatId}`, {
+    const apiRes = await fetchFastAPI(`/api/report/${threatId}`, {
       method: "GET",
-      headers: {
-        Authorization: authHeader,
-      },
+      headers,
       cache: "no-store",
       signal: AbortSignal.timeout(15000),
     });

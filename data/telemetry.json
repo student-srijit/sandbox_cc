@@ -5445,5 +5445,18 @@
     "server_breakdown": "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
     "client_breakdown": "[{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"}]",
     "id": "BB-TL-1772891986214-ZI6NFWQ"
+  },
+  {
+    "timestamp": 1772901553139,
+    "ip_address": "::1",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "session_hash": "69B1B5BD471BDDA7",
+    "server_score": 12,
+    "client_score": 55,
+    "final_score": 67,
+    "tier": "SUSPICIOUS",
+    "server_breakdown": "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
+    "client_breakdown": "[{\"check\":\"Mouse Entropy\",\"score\":35,\"reason\":\"Zero mouse movements detected in viewport.\"},{\"check\":\"Timing\",\"score\":20,\"reason\":\"No interaction and zero mouse movement detected within limit.\"}]",
+    "id": "BB-TL-1772901553140-VBIAN7V"
   }
 ]
