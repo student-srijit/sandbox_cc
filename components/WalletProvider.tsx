@@ -1,15 +1,29 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useCallback, useContext, useState, useEffect, useRef } from 'react'
 import { ethers } from 'ethers'
+import { DEFAULT_CHAIN_ID, SUPPORTED_CHAINS, type SupportedChainId } from '@/lib/web3/chains'
+
+interface EthereumProvider {
+    request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
+    on: (event: string, listener: (...args: unknown[]) => void) => void
+    removeListener: (event: string, listener: (...args: unknown[]) => void) => void
+}
+
+type WindowWithEthereum = Window & {
+    ethereum?: EthereumProvider
+}
 
 interface WalletContextType {
     address: string | null
     balance: string | null
     chainId: number | null
+    preferredChainId: SupportedChainId
     missingMetaMask: boolean
     isActive: boolean
     connectWallet: () => Promise<void>
+    setPreferredChainId: (chainId: SupportedChainId) => void
+    switchChain: (targetChainId: SupportedChainId) => Promise<boolean>
     dismissModal: () => void
 }
 
@@ -17,9 +31,12 @@ const WalletContext = createContext<WalletContextType>({
     address: null,
     balance: null,
     chainId: null,
+    preferredChainId: DEFAULT_CHAIN_ID,
     missingMetaMask: false,
     isActive: false,
-    connectWallet: async () => { },
+    connectWallet: async () => {},
+    setPreferredChainId: () => { },
+    switchChain: async () => false,
     dismissModal: () => { },
 })
 
@@ -27,76 +44,162 @@ export function useWallet() {
     return useContext(WalletContext)
 }
 
-// Sepolia chain ID is 11155111 (0xaa36a7)
-const TARGET_CHAIN_ID = BigInt(11155111)
-const TARGET_CHAIN_HEX = '0xaa36a7'
+const PREFERRED_CHAIN_STORAGE_KEY = 'bb-preferred-chain'
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
     const [address, setAddress] = useState<string | null>(null)
     const [balance, setBalance] = useState<string | null>(null)
     const [chainId, setChainId] = useState<number | null>(null)
+    const [preferredChainId, setPreferredChainIdState] = useState<SupportedChainId>(DEFAULT_CHAIN_ID)
     const [missingMetaMask, setMissingMetaMask] = useState(false)
     const [isActive, setIsActive] = useState(false)
+    // Prevents concurrent wallet_addEthereumChain / wallet_switchEthereumChain calls
+    // that cause MetaMask -32002 "already pending" errors.
+    const chainSwitchInFlight = useRef(false)
 
     const dismissModal = () => setMissingMetaMask(false)
 
-    const connectWallet = async () => {
+    const setPreferredChainId = useCallback((nextChainId: SupportedChainId) => {
+        setPreferredChainIdState(nextChainId)
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(PREFERRED_CHAIN_STORAGE_KEY, String(nextChainId))
+        }
+    }, [])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const stored = window.localStorage.getItem(PREFERRED_CHAIN_STORAGE_KEY)
+        if (!stored) return
+
+        const parsed = Number(stored)
+        if (parsed === 11155111 || parsed === 11142220) {
+            setPreferredChainIdState(parsed)
+        }
+    }, [])
+
+    const switchChain = useCallback(async (targetChainId: SupportedChainId): Promise<boolean> => {
+        if (typeof window === 'undefined' || !(window as WindowWithEthereum).ethereum) {
+            setMissingMetaMask(true)
+            return false
+        }
+
+        const eth = (window as WindowWithEthereum).ethereum
+        if (!eth) {
+            setMissingMetaMask(true)
+            return false
+        }
+
+        // Guard against concurrent switch attempts (causes MetaMask -32002)
+        if (chainSwitchInFlight.current) return false
+        chainSwitchInFlight.current = true
+
+        const chain = SUPPORTED_CHAINS[targetChainId]
+
+        try {
+            await eth.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: chain.chainHex }],
+            })
+            return true
+        } catch (switchError: unknown) {
+            const code =
+                typeof switchError === 'object' && switchError !== null && 'code' in switchError
+                    ? Number((switchError as { code?: unknown }).code)
+                    : null
+
+            // -32002: a wallet_addEthereumChain popup is already open — not an error, just skip
+            if (code === -32002) {
+                console.warn('Chain operation already pending in MetaMask — please confirm the MetaMask popup.')
+                return false
+            }
+
+            // 4902: chain has not been added to wallet yet
+            if (code === 4902) {
+                try {
+                    await eth.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                            chainId: chain.chainHex,
+                            chainName: chain.chainName,
+                            nativeCurrency: chain.nativeCurrency,
+                            rpcUrls: chain.rpcUrls,
+                            blockExplorerUrls: chain.blockExplorerUrls,
+                        }],
+                    })
+                    return true
+                } catch (addError: unknown) {
+                    const addCode =
+                        typeof addError === 'object' && addError !== null && 'code' in addError
+                            ? Number((addError as { code?: unknown }).code)
+                            : null
+                    // -32002: popup already open (duplicate call) — inform user to confirm popup
+                    if (addCode === -32002) {
+                        console.warn('Chain add already pending in MetaMask — please confirm the MetaMask popup.')
+                    } else {
+                        console.error('User rejected adding chain or wallet rejected params.', addError)
+                    }
+                    return false
+                }
+            }
+
+            console.error('Chain switch rejected by wallet or user.', switchError)
+            return false
+        } finally {
+            chainSwitchInFlight.current = false
+        }
+    }, [])
+
+    const connectWallet = useCallback(async () => {
         // 1. Check for MetaMask
-        if (typeof window === 'undefined' || !(window as any).ethereum) {
+        if (typeof window === 'undefined' || !(window as WindowWithEthereum).ethereum) {
             setMissingMetaMask(true)
             return
         }
 
         try {
-            const eth = (window as any).ethereum
+            const eth = (window as WindowWithEthereum).ethereum
+            if (!eth) {
+                setMissingMetaMask(true)
+                return
+            }
 
-            // 2. Request Accounts
-            const accounts = await eth.request({ method: 'eth_requestAccounts' })
+            // 2. Request accounts — no forced chain switch here.
+            // The user can switch chains via the explicit "SWITCH IN WALLET" button.
+            const accounts = await eth.request({ method: 'eth_requestAccounts' }) as string[]
             if (!accounts || accounts.length === 0) return
 
             const currentAddress = accounts[0]
             const provider = new ethers.BrowserProvider(eth)
+            const network = await provider.getNetwork()
 
-            // 3. Enforce Sepolia Network
-            let network = await provider.getNetwork()
-            if (network.chainId !== TARGET_CHAIN_ID) {
-                try {
-                    await eth.request({
-                        method: 'wallet_switchEthereumChain',
-                        params: [{ chainId: TARGET_CHAIN_HEX }],
-                    })
-                    // Refresh network after switch
-                    network = await provider.getNetwork()
-                } catch (switchError: any) {
-                    console.error("User rejected network switch or Sepolia not added.", switchError)
-                    return // Abort if they refuse to switch
-                }
-            }
-
-            // 4. Fetch Balance
+            // 3. Fetch Balance
             const balanceWei = await provider.getBalance(currentAddress)
             const balanceEth = parseFloat(ethers.formatEther(balanceWei)).toFixed(4)
 
-            // 5. Update State
+            // 4. Update State
             setAddress(currentAddress)
             setBalance(balanceEth)
             setChainId(Number(network.chainId))
             setIsActive(true)
 
-            // 6. Notify the Backend telemetry that a legitimate node was protected
-            fetch('/api/protect', { method: 'POST' }).catch(() => { })
+            // 5. Notify the Backend telemetry that a legitimate node was protected
+            fetch('/api/protect', { method: 'POST' }).catch(() => {})
 
         } catch (err) {
-            console.error("Error connecting wallet:", err)
+            console.error('Error connecting wallet:', err)
         }
-    }
+    }, [])
 
     // Handle account/chain changes
     useEffect(() => {
-        if (typeof window === 'undefined' || !(window as any).ethereum) return
-        const eth = (window as any).ethereum
+        if (typeof window === 'undefined' || !(window as WindowWithEthereum).ethereum) return
+        const eth = (window as WindowWithEthereum).ethereum
+        if (!eth) return
 
-        const handleAccountsChanged = (accounts: string[]) => {
+        const handleAccountsChanged = (...args: unknown[]) => {
+            const accounts = Array.isArray(args[0])
+                ? args[0].filter((value): value is string => typeof value === 'string')
+                : []
             if (accounts.length === 0) {
                 setIsActive(false)
                 setAddress(null)
@@ -118,10 +221,23 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
             eth.removeListener('accountsChanged', handleAccountsChanged)
             eth.removeListener('chainChanged', handleChainChanged)
         }
-    }, [])
+    }, [connectWallet])
 
     return (
-        <WalletContext.Provider value={{ address, balance, chainId, missingMetaMask, isActive, connectWallet, dismissModal }}>
+        <WalletContext.Provider
+            value={{
+                address,
+                balance,
+                chainId,
+                preferredChainId,
+                missingMetaMask,
+                isActive,
+                connectWallet,
+                setPreferredChainId,
+                switchChain,
+                dismissModal,
+            }}
+        >
             {children}
 
             {/* Missing MetaMask Modal */}

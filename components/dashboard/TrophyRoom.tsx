@@ -26,9 +26,15 @@ interface ThreatRecord {
         inferred_toolchain: string
         confidence: number
     }
-    timeline: any
+    timeline?: {
+        time_wasted_seconds?: number
+        total_requests?: number
+    }
     payloads: PayloadLog[]
-    honeypot_effectiveness: any
+}
+
+interface DashboardResponse {
+    logs?: ThreatRecord[]
 }
 
 export default function TrophyRoom() {
@@ -44,16 +50,14 @@ export default function TrophyRoom() {
                     headers: { 'Authorization': `Bearer ${token}` }
                 })
                 if (res.ok) {
-                    const data = await res.json()
-                    // Filter for BOT tiers with advanced tooling
-                    const bots = data.logs.filter((l: any) =>
-                        l.network?.tier === 'BOT' &&
-                        l.classification?.inferred_toolchain &&
-                        l.classification?.inferred_toolchain !== 'Unknown Tooling'
+                    const data = (await res.json()) as DashboardResponse
+                    // Filter for BOT tiers
+                    const bots = (data.logs || []).filter((log) =>
+                        log.network?.tier === 'BOT'
                     )
                     setTrophies(bots)
                 }
-            } catch (e) { }
+            } catch { }
         }
         fetchTrophies()
         const id = setInterval(fetchTrophies, 2000)
@@ -92,7 +96,10 @@ export default function TrophyRoom() {
                             <div className="flex justify-between items-start mb-5">
                                 <div>
                                     <div className="text-[11px] tracking-widest text-[#FFD700] mb-1 font-bold">
-                                        {t.classification.inferred_toolchain}
+                                        {t.classification.inferred_toolchain && t.classification.inferred_toolchain !== 'Unknown Tooling'
+                                            ? t.classification.inferred_toolchain
+                                            : t.classification.attack_type || 'Unclassified Attacker'
+                                        }
                                     </div>
                                     <div className="text-xs text-white font-mono opacity-80 flex items-center gap-2">
                                         <span className="text-[#555] text-[9px] uppercase tracking-widest">TARGET</span>
@@ -107,12 +114,12 @@ export default function TrophyRoom() {
                             <div className="space-y-4">
                                 <div className="flex justify-between items-end border-b border-[#222] pb-2">
                                     <div className="text-[8px] text-[#555] tracking-widest uppercase mb-1">Time Wasted in Honeypot</div>
-                                    <div className="text-[#00FF41] text-sm font-mono font-bold tracking-widest">{t.timeline.time_wasted_seconds}s</div>
+                                    <div className="text-[#00FF41] text-sm font-mono font-bold tracking-widest">{t.timeline?.time_wasted_seconds ?? 0}s</div>
                                 </div>
 
                                 <div className="flex justify-between items-end border-b border-[#222] pb-2">
                                     <div className="text-[8px] text-[#555] tracking-widest uppercase mb-1">Total RPC Exploits Attempted</div>
-                                    <div className="text-white text-sm font-mono tracking-widest">[{t.timeline.total_requests}]</div>
+                                    <div className="text-white text-sm font-mono tracking-widest">[{t.timeline?.total_requests ?? 0}]</div>
                                 </div>
 
                                 <div className="pt-2">

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
-
-const FASTAPI_URL = 'http://127.0.0.1:8000'
+import { FASTAPI_URL } from '@/lib/backend-config'
 
 export async function GET(
     request: NextRequest,

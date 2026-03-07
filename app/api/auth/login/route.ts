@@ -1,6 +1,5 @@
 import { NextResponse, NextRequest } from 'next/server'
-
-const FASTAPI_URL = 'http://127.0.0.1:8000'
+import { FASTAPI_URL } from '@/lib/backend-config'
 
 export async function POST(request: NextRequest) {
     try {
@@ -15,7 +14,7 @@ export async function POST(request: NextRequest) {
         const data = await apiRes.json()
 
         return NextResponse.json(data, { status: apiRes.ok ? 200 : apiRes.status })
-    } catch (err) {
+    } catch {
         return NextResponse.json(
             { error: { code: -32603, message: "Internal proxy error" } },
             { status: 500 }

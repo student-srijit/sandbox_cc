@@ -131,7 +131,7 @@ export default function SessionReplay({ threatId, onClose }: Props) {
 
     return (
         <div
-            className="fixed inset-0 z-50 flex items-center justify-center"
+            className="fixed inset-0 z-[1001] flex items-center justify-center"
             style={{ background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(4px)' }}
             onClick={e => { if (e.target === e.currentTarget) onClose() }}
         >

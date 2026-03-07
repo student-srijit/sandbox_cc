@@ -1,10 +1,16 @@
 from fastapi import APIRouter, Request, HTTPException, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 import json
 
 from models import JsonRpcRequest, JsonRpcErrorResponse, JsonRpcError
 from honeypot import honeypot_engine
 from auth import verify_password, create_access_token, verify_token, ADMIN_USER, ADMIN_PASS_HASH
+
+
+def _unauthorized():
+    """Returns a proper HTTP 401 so Next.js can detect and propagate auth failures."""
+    return JSONResponse(status_code=401, content={"error": "Unauthorized"})
 
 class LoginRequest(BaseModel):
     username: str
@@ -48,56 +54,149 @@ async def get_dashboard_stats(request: Request):
     """
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
+        return _unauthorized()
         
     token = auth_header.split(" ")[1]
     try:
         verify_token(token)
     except ValueError:
-        return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
+        return _unauthorized()
         
     from database import get_recent_threats, get_dashboard_aggregates
-    logs = get_recent_threats(limit=50)
+    db_logs = get_recent_threats(limit=50)
     aggs = get_dashboard_aggregates()
     
     # Analyze the active memory array to find "LIVE" attacker count for the dashboard
     from intelligence import intel_logger
     active_now = len(intel_logger.active_threats)
     
+    # Merge live in-memory sessions into the response so the feed
+    # shows threats BEFORE they are flushed to the DB.
+    live_logs = []
+    for rec in intel_logger.active_threats.values():
+        live_logs.append(rec.model_dump())
+    
+    # Deduplicate: DB records already flushed should not appear twice
+    db_ids = {l.get('threat_id') for l in db_logs}
+    unique_live = [l for l in live_logs if l.get('threat_id') not in db_ids]
+    
+    logs = unique_live + db_logs  # live first, then historical
+
+    # Include containment status for the dashboard war-room indicator
+    from containment import containment
+    containment_status = containment.get_status()
+
     return {
         "logs": logs,
         "stats": {
             "total": aggs["total_threats"],
             "bots": active_now,
             "suspicious": 0,
-            "mutations_total": aggs["total_generations"],
+            "mutations_total": aggs["total_mutations"] if "total_mutations" in aggs else aggs.get("total_generations", 0),
             "taxonomy": aggs["taxonomy"]
-        }
+        },
+        "containment": containment_status,
     }
 
 class DefendRequest(BaseModel):
     ip_address: str
-    defense_type: str # "TAR_PIT" or "POISONED_ABI"
+    defense_type: str  # "TAR_PIT" | "POISONED_ABI" | "QUARANTINE" | "SHADOW_BAN" | "SINKHOLE" | "CRITICAL_INCIDENT"
+    threat_id: str | None = None  # Optional: associate containment with a specific threat record
 
 @router.post("/api/dashboard/defend")
 async def deploy_active_defense(request: Request, body: DefendRequest):
     """
     Protected endpoint. Deploys a retaliation payload against a specific IP.
+    Supports legacy modes (TAR_PIT, POISONED_ABI) and new containment playbooks.
     """
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
+        return _unauthorized()
         
     token = auth_header.split(" ")[1]
     try:
         verify_token(token)
     except ValueError:
-        return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
-        
+        return _unauthorized()
+
+    from containment import containment, ContainmentMode
     from world_state import manager as ws_manager
-    ws_manager.deploy_defense(body.ip_address, body.defense_type)
+
+    # Normalise and validate the requested mode
+    try:
+        mode = ContainmentMode(body.defense_type)
+    except ValueError:
+        return JsonRpcErrorResponse(
+            error=JsonRpcError(code=-32602, message=f"Unknown defense_type: {body.defense_type}"),
+            id=None,
+        )
+
+    # Deploy via the containment orchestrator (superset of world_state defenses)
+    containment.deploy(
+        ip=body.ip_address,
+        mode=mode,
+        threat_id=body.threat_id,
+        reason=f"Manual deployment by analyst via dashboard",
+    )
+    # Keep legacy world_state map in sync for TAR_PIT and POISONED_ABI
+    if mode in (ContainmentMode.TAR_PIT, ContainmentMode.POISONED_ABI):
+        ws_manager.deploy_defense(body.ip_address, body.defense_type)
     
-    return {"status": "deployed", "ip": body.ip_address, "weapon": body.defense_type}
+    return {
+        "status": "deployed",
+        "ip": body.ip_address,
+        "mode": mode.value,
+        "critical_incident": containment.critical_incident_active,
+    }
+
+
+@router.get("/api/containment/status")
+async def get_containment_status(request: Request):
+    """
+    Protected endpoint. Returns all active containment events and
+    whether a CRITICAL_INCIDENT has been declared.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return _unauthorized()
+
+    token = auth_header.split(" ")[1]
+    try:
+        verify_token(token)
+    except ValueError:
+        return _unauthorized()
+
+    from containment import containment
+    return containment.get_status()
+
+
+@router.post("/api/containment/release")
+async def release_containment(request: Request):
+    """
+    Protected endpoint. Analyst releases a contained IP (manual override).
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return _unauthorized()
+
+    token = auth_header.split(" ")[1]
+    try:
+        verify_token(token)
+    except ValueError:
+        return _unauthorized()
+
+    body_raw = await request.json()
+    ip = body_raw.get("ip_address", "")
+    if not ip:
+        return {"status": "error", "detail": "ip_address required"}
+
+    from containment import containment
+    containment.release(ip)
+    # Also clear critical incident if no more containments
+    if not containment.active_containments:
+        containment.critical_incident_active = False
+        containment.critical_incident_threat_id = None
+    return {"status": "released", "ip": ip}
 
 @router.post("/api/flush")
 async def force_flush():
@@ -134,6 +233,13 @@ async def get_session_replay(request: Request, threat_id: str):
     from database import get_threat_by_id
     record = get_threat_by_id(threat_id)
     if not record:
+        # Session may still be live in memory and not yet flushed to SQLite
+        from intelligence import intel_logger
+        for sess_record in intel_logger.active_threats.values():
+            if sess_record.threat_id == threat_id:
+                record = sess_record.model_dump()
+                break
+    if not record:
         raise HTTPException(status_code=404, detail="Threat dossier not found")
 
     payloads = record.get("payloads", [])
@@ -161,12 +267,33 @@ async def get_session_replay(request: Request, threat_id: str):
             "delta_ms": delta_ms,
         })
 
+    raw_cls = record.get("classification", {})
+
+    # Enrich classification with ATT&CK metadata if not already present
+    if not raw_cls.get("attack_technique_id"):
+        try:
+            from containment import get_attack_technique, build_trigger_reason
+            tech = get_attack_technique(raw_cls.get("attack_type", "RPC_PROBING"))
+            raw_cls["attack_technique_id"] = tech.get("technique_id")
+            raw_cls["attack_technique_name"] = tech.get("technique_name")
+            raw_cls["attack_tactic"] = tech.get("tactic")
+            if not raw_cls.get("trigger_reason"):
+                raw_cls["trigger_reason"] = build_trigger_reason(
+                    raw_cls.get("attack_type", "RPC_PROBING"),
+                    raw_cls.get("confidence", 0.5),
+                    len(payloads),
+                    record.get("network", {}).get("tier", "BOT"),
+                )
+        except Exception:
+            pass
+
     return {
         "threat_id": record.get("threat_id"),
         "session_id": record.get("session_id"),
         "ip": record.get("network", {}).get("entry_ip", "0.0.0.0"),
-        "toolchain": record.get("classification", {}).get("inferred_toolchain", "Unknown"),
-        "attack_type": record.get("classification", {}).get("attack_type", "Unknown"),
+        "toolchain": raw_cls.get("inferred_toolchain", "Unknown"),
+        "attack_type": raw_cls.get("attack_type", "Unknown"),
+        "classification": raw_cls,
         "total_steps": len(enriched),
         "time_wasted_seconds": record.get("timeline", {}).get("time_wasted_seconds", 0),
         "steps": enriched,

@@ -6,8 +6,12 @@ import time
 import os
 import secrets
 
-# Use env var or default for demo
-SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-bhool-bhulaiyaa-key-2026")
+# Use env var for deterministic signing. In production, this must be set.
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    if os.getenv("ENV", "development").lower() == "production":
+        raise RuntimeError("SECRET_KEY must be set in production.")
+    SECRET_KEY = secrets.token_urlsafe(48)
 
 # Default admin credentials
 ADMIN_USER = os.getenv("ADMIN_USER", "bhool")

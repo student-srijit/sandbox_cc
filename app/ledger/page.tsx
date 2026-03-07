@@ -18,12 +18,31 @@ interface LedgerEntry {
     tx_hash: string
 }
 
+interface WalletTx {
+    chain: 'sepolia' | 'celo-sepolia'
+    hash: string
+    timestamp: number
+    blockNumber: string
+    from: string
+    to: string
+    value: string
+    symbol: string
+    status: 'success' | 'failed'
+    kind: 'native' | 'token'
+    explorerUrl: string
+    functionName: string
+}
+
 export default function LedgerPage() {
-    const { isActive, address, connectWallet } = useWallet()
+    const { isActive, connectWallet, address, preferredChainId } = useWallet()
     const [entries, setEntries] = useState<LedgerEntry[]>([])
     const [loading, setLoading] = useState(true)
     const [verifying, setVerifying] = useState<string | null>(null)
     const [verifiedIds, setVerifiedIds] = useState<Set<string>>(new Set())
+    const [walletTxs, setWalletTxs] = useState<WalletTx[]>([])
+    const [walletTxLoading, setWalletTxLoading] = useState(false)
+
+    const preferredChainLabel = preferredChainId === 11155111 ? 'sepolia' : 'celo-sepolia'
 
     useEffect(() => {
         const fetchLedger = async () => {
@@ -44,6 +63,36 @@ export default function LedgerPage() {
         const interval = setInterval(fetchLedger, 10000)
         return () => clearInterval(interval)
     }, [])
+
+    useEffect(() => {
+        const fetchWalletTxs = async () => {
+            if (!isActive || !address) {
+                setWalletTxs([])
+                return
+            }
+
+            setWalletTxLoading(true)
+            try {
+                const res = await fetch(`/api/web3/transactions?address=${address}&chain=${preferredChainLabel}&limit=20`, {
+                    cache: 'no-store',
+                })
+
+                if (!res.ok) {
+                    setWalletTxs([])
+                    return
+                }
+
+                const data = await res.json()
+                setWalletTxs(Array.isArray(data.transactions) ? data.transactions : [])
+            } catch {
+                setWalletTxs([])
+            } finally {
+                setWalletTxLoading(false)
+            }
+        }
+
+        fetchWalletTxs()
+    }, [address, isActive, preferredChainLabel])
 
     const handleVerify = async (entry: LedgerEntry) => {
         if (!isActive) {
@@ -87,7 +136,9 @@ export default function LedgerPage() {
 
                             {!isActive ? (
                                 <button
-                                    onClick={connectWallet}
+                                    onClick={() => {
+                                        void connectWallet()
+                                    }}
                                     className="px-6 py-2 border border-[#00FFD1] bg-[#00FFD1]/10 text-[#00FFD1] hover:bg-[#00FFD1] hover:text-black transition-all font-bold tracking-widest text-xs"
                                 >
                                     CONNECT WALLET TO VERIFY
@@ -105,7 +156,73 @@ export default function LedgerPage() {
                                 [ SYNCHRONIZING WITH BLOCKCHAIN... ]
                             </div>
                         ) : (
-                            <div className="bg-[#0b0c10]/80 backdrop-blur-md border border-[#222]">
+                            <div className="space-y-6">
+                                <div className="bg-[#0b0c10]/80 backdrop-blur-md border border-[#222] p-5">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h2 className="text-sm tracking-[0.2em] text-white uppercase">Your Blockchain Transactions</h2>
+                                        <span className="text-[10px] uppercase tracking-[0.18em] text-[#8a8f99]">
+                                            Chain: {preferredChainLabel}
+                                        </span>
+                                    </div>
+
+                                    {!isActive ? (
+                                        <p className="text-xs text-[#7f8490] tracking-widest uppercase">
+                                            Connect wallet to load your on-chain transaction history.
+                                        </p>
+                                    ) : walletTxLoading ? (
+                                        <p className="text-xs text-[#00FFD1] tracking-widest uppercase animate-pulse">
+                                            Loading wallet transactions...
+                                        </p>
+                                    ) : walletTxs.length === 0 ? (
+                                        <p className="text-xs text-[#7f8490] tracking-widest uppercase">
+                                            No explorer transactions found for this wallet on {preferredChainLabel}.
+                                        </p>
+                                    ) : (
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-left text-[11px]">
+                                                <thead className="border-b border-[#222]">
+                                                    <tr>
+                                                        <th className="px-3 py-2 text-[#888] font-normal uppercase tracking-widest">Time</th>
+                                                        <th className="px-3 py-2 text-[#888] font-normal uppercase tracking-widest">Type</th>
+                                                        <th className="px-3 py-2 text-[#888] font-normal uppercase tracking-widest">Value</th>
+                                                        <th className="px-3 py-2 text-[#888] font-normal uppercase tracking-widest">Status</th>
+                                                        <th className="px-3 py-2 text-[#888] font-normal uppercase tracking-widest">Tx Hash</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {walletTxs.map((tx) => (
+                                                        <tr key={`${tx.kind}:${tx.hash}:${tx.timestamp}`} className="border-b border-[#15171d]">
+                                                            <td className="px-3 py-2 text-[#b8bdc8]">
+                                                                {new Date(tx.timestamp).toISOString().replace('T', ' ').slice(0, 19)}
+                                                            </td>
+                                                            <td className="px-3 py-2 text-[#c6ccda] uppercase tracking-wider">
+                                                                {tx.kind}
+                                                            </td>
+                                                            <td className="px-3 py-2 text-[#00FFD1]">
+                                                                {tx.value} {tx.symbol}
+                                                            </td>
+                                                            <td className={`px-3 py-2 uppercase tracking-widest ${tx.status === 'success' ? 'text-[#00FF41]' : 'text-[#FF4D6D]'}`}>
+                                                                {tx.status}
+                                                            </td>
+                                                            <td className="px-3 py-2">
+                                                                <a
+                                                                    href={tx.explorerUrl}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="text-[var(--accent-magenta)] underline"
+                                                                >
+                                                                    {tx.hash.slice(0, 12)}...{tx.hash.slice(-10)}
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="bg-[#0b0c10]/80 backdrop-blur-md border border-[#222]">
                                 <table className="w-full text-left text-xs">
                                     <thead className="border-b border-[#333] bg-black">
                                         <tr>
@@ -168,6 +285,7 @@ export default function LedgerPage() {
                                         )}
                                     </tbody>
                                 </table>
+                                </div>
                             </div>
                         )}
                     </div>

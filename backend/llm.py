@@ -2,6 +2,7 @@ import json
 import logging
 import aiohttp
 import re
+import secrets
 from typing import Optional, Dict, Any
 from world_state import WorldState
 from prompts import SYSTEM_PROMPT, JACKPOT_ADDRESS
@@ -107,16 +108,83 @@ async def generate_response(state: WorldState, payload_text: str) -> Dict[str, A
     # Fallback if Ollama is totally unreachable or hallucinated twice
     if not response_obj:
         logger.error("LLM failed completely. Falling back to static library.")
-        return _fallback_static_response(payload_text)
+        return _fallback_static_response(state, payload_text)
         
     return response_obj
 
-def _fallback_static_response(payload: str) -> Dict[str, Any]:
+def _fallback_static_response(state: WorldState, payload: str) -> Dict[str, Any]:
     """Provides a realistic fallback if the Generative AI is offline."""
     try:
         req = json.loads(payload)
         method = req.get("method", "")
+        params = req.get("params", [])
         req_id = req.get("id", 1)
+
+        if method == "eth_blockNumber":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": hex(state.simulated_block_height)
+            }
+
+        if method == "eth_getTransactionCount":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": hex(state.attacker_nonce)
+            }
+
+        if method == "eth_sendRawTransaction":
+            tx_hash = "0x" + secrets.token_hex(32)
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": tx_hash
+            }
+
+        if method == "eth_getTransactionReceipt":
+            tx_hash = params[0] if isinstance(params, list) and params else ""
+            if tx_hash in state.fake_transactions:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "transactionHash": tx_hash,
+                        "transactionIndex": "0x0",
+                        "blockNumber": hex(max(0, state.simulated_block_height - 1)),
+                        "blockHash": "0x" + secrets.token_hex(32),
+                        "cumulativeGasUsed": "0x5208",
+                        "gasUsed": "0x5208",
+                        "contractAddress": None,
+                        "logs": [],
+                        "status": "0x1"
+                    }
+                }
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32601, "message": "Method not found"}
+            }
+
+        if method == "eth_accounts":
+            wallets = list(state.get_public_state().get("wallets", {}).keys())
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": wallets
+            }
+
+        if method == "eth_getBalance":
+            address = ""
+            if isinstance(params, list) and params:
+                address = str(params[0])
+            wallet = state.get_public_state().get("wallets", {}).get(address)
+            balance = wallet.get("balance_wei") if isinstance(wallet, dict) else "0x0"
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": balance
+            }
         
         if method in STATIC_RPC_LIBRARY:
             return {

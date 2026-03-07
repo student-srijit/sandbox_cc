@@ -1,31 +1,8 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-const HEX_CHARS = '0123456789abcdef'
-
-function fakePrivKey() {
-    return '0x' + Array.from({ length: 64 }, () =>
-        HEX_CHARS[Math.floor(Math.random() * 16)]
-    ).join('')
-}
-
-function fakeAddr() {
-    return '0x' + Array.from({ length: 40 }, () =>
-        HEX_CHARS[Math.floor(Math.random() * 16)]
-    ).join('')
-}
-
-function fakeBal() {
-    return (Math.random() * 180 + 12).toFixed(4)
-}
-
-const ATTACKER_IPS = [
-    '103.28.41.219', '185.220.101.44', '45.148.10.92',
-    '91.132.147.55', '176.111.174.31',
-]
-
-interface FakeData {
+interface IntelData {
     id: number
     type: 'PRIVATE_KEY' | 'ETH_BALANCE' | 'CONTRACT_ADDR'
     value: string
@@ -33,28 +10,27 @@ interface FakeData {
     timestamp: string
 }
 
-let fakeId = 0
+let intelId = 0
 
-function makeFake(): FakeData {
-    const types: FakeData['type'][] = ['PRIVATE_KEY', 'ETH_BALANCE', 'CONTRACT_ADDR']
-    const type = types[Math.floor(Math.random() * types.length)]
-    let value = ''
-    switch (type) {
-        case 'PRIVATE_KEY': value = fakePrivKey(); break
-        case 'ETH_BALANCE': value = `${fakeBal()} ETH`; break
-        case 'CONTRACT_ADDR': value = fakeAddr(); break
+interface ThreatPayload {
+    method?: string
+    params?: unknown
+}
+
+interface ThreatApiLog {
+    threat_id: string
+    network?: {
+        tier?: string
+        entry_ip?: string
     }
-    return {
-        id: ++fakeId,
-        type,
-        value,
-        ip: ATTACKER_IPS[Math.floor(Math.random() * ATTACKER_IPS.length)],
-        timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+    payloads?: ThreatPayload[]
+    timeline?: {
+        last_active?: number | string
     }
 }
 
 export default function IntelFeed() {
-    const [items, setItems] = useState<FakeData[]>([])
+    const [items, setItems] = useState<IntelData[]>([])
 
     const knownLiveIds = useRef(new Set<string>())
 
@@ -64,31 +40,34 @@ export default function IntelFeed() {
                 const res = await fetch('/api/threats')
                 if (!res.ok) return
                 const data = await res.json()
+                const logs = Array.isArray(data?.logs) ? (data.logs as ThreatApiLog[]) : []
 
-                const newLogs = (data.logs || []).filter((l: any) => l.network?.tier === 'BOT' && !knownLiveIds.current.has(l.threat_id))
+                const newLogs = logs.filter((log) => log.network?.tier === 'BOT' && !knownLiveIds.current.has(log.threat_id))
 
                 if (newLogs.length > 0) {
-                    const mapped = newLogs.map((l: any) => {
-                        knownLiveIds.current.add(l.threat_id)
-                        const payloads = l.payloads || []
+                    const mapped = newLogs.map((log) => {
+                        knownLiveIds.current.add(log.threat_id)
+                        const payloads = log.payloads || []
                         const method = payloads.length > 0 ? payloads[0].method : 'ETH_BALANCE'
-                        const valueStr = payloads.length > 0 ? JSON.stringify(payloads[0].params || {}) : fakePrivKey()
+                        const valueStr = payloads.length > 0
+                            ? JSON.stringify(payloads[0].params || {})
+                            : '<no-payload-captured>'
 
-                        let type: FakeData['type'] = 'CONTRACT_ADDR'
-                        if (method.includes('Transaction') || method.includes('send') || method.includes('sign')) type = 'PRIVATE_KEY'
-                        else if (method.includes('call') || method.includes('Balance')) type = 'ETH_BALANCE'
+                        let type: IntelData['type'] = 'CONTRACT_ADDR'
+                        if (method?.includes('Transaction') || method?.includes('send') || method?.includes('sign')) type = 'PRIVATE_KEY'
+                        else if (method?.includes('call') || method?.includes('Balance')) type = 'ETH_BALANCE'
 
                         return {
-                            id: ++fakeId,
+                            id: ++intelId,
                             type,
                             value: valueStr.substring(0, 50) + (valueStr.length > 50 ? '...' : ''),
-                            ip: l.network?.entry_ip || 'UNKNOWN',
-                            timestamp: new Date(l.timeline?.last_active || Date.now()).toLocaleTimeString('en-GB', { hour12: false }),
+                            ip: log.network?.entry_ip || 'UNKNOWN',
+                            timestamp: new Date(log.timeline?.last_active || Date.now()).toLocaleTimeString('en-GB', { hour12: false }),
                         }
                     })
                     setItems(prev => [...mapped, ...prev].slice(0, 15))
                 }
-            } catch (err) { }
+            } catch { }
         }
 
         pollIntel()
@@ -96,7 +75,7 @@ export default function IntelFeed() {
         return () => clearInterval(id)
     }, [])
 
-    const typeColor = (t: FakeData['type']) => {
+    const typeColor = (t: IntelData['type']) => {
         switch (t) {
             case 'PRIVATE_KEY': return '#FF2020'
             case 'ETH_BALANCE': return '#FFB800'
@@ -104,7 +83,7 @@ export default function IntelFeed() {
         }
     }
 
-    const typeLabel = (t: FakeData['type']) => {
+    const typeLabel = (t: IntelData['type']) => {
         switch (t) {
             case 'PRIVATE_KEY': return '🔑 PRIV KEY'
             case 'ETH_BALANCE': return '💰 BALANCE'
@@ -167,7 +146,7 @@ export default function IntelFeed() {
             {/* Footer */}
             <div className="px-3 py-1.5 border-t border-[#111] flex-shrink-0">
                 <p className="text-[7px] text-[#222] text-center tracking-widest uppercase">
-                    All data is AI-generated bait · Ollama LLM Active
+                    Live threat telemetry feed
                 </p>
             </div>
         </div>

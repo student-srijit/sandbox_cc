@@ -20,7 +20,7 @@ export default function LoginPage() {
                     const data = await res.json()
                     setActiveSessions(data.active_sessions || 0)
                 }
-            } catch (e) { }
+            } catch { }
         }
         fetchStats()
         const id = setInterval(fetchStats, 2000)
@@ -50,7 +50,7 @@ export default function LoginPage() {
             if (data.token) {
                 login(data.token)
             }
-        } catch (e) {
+        } catch {
             setError('Authentication subsystem offline')
             setLoading(false)
         }
@@ -125,6 +125,9 @@ export default function LoginPage() {
 
                 <div className="mt-8 text-center text-[9px] text-[#777] tracking-widest uppercase">
                     Authorized Personnel Only
+                </div>
+                <div className="mt-3 text-center text-[8px] text-[#444] tracking-wider font-mono">
+                    default: bhool / bhulaiyaa2026
                 </div>
             </div>
         </div>

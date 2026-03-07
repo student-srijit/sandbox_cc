@@ -1,22 +1,11 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '@/components/AuthProvider'
 import SessionReplay from '@/components/dashboard/SessionReplay'
 
-const ATTACK_TYPES = [
-    'SQL_INJECTION', 'RPC_PROBING', 'WALLET_DRAIN', 'PATH_TRAVERSAL',
-    'XSS_PROBE', 'BRUTE_FORCE', 'ABI_DECODE', 'MEMPOOL_SNIFF',
-] as const
-
-const IPS = [
-    '103.28.41.', '185.220.101.', '45.148.10.', '91.132.147.',
-    '176.111.174.', '194.26.192.', '5.188.86.', '212.193.30.',
-    '103.75.201.', '45.155.205.', '185.156.73.', '91.241.19.',
-]
-
 interface Session {
-    id: number
+    id: string | number
     time: string
     ip: string
     type: string
@@ -24,21 +13,18 @@ interface Session {
     severity: 'high' | 'medium' | 'low'
 }
 
-let sid = 0
-
-function makeSession(): Session {
-    const type = ATTACK_TYPES[Math.floor(Math.random() * ATTACK_TYPES.length)]
-    const ip = IPS[Math.floor(Math.random() * IPS.length)] + Math.floor(Math.random() * 254 + 1)
-    const statusRoll = Math.random()
-    const status: Session['status'] = statusRoll < 0.4 ? 'FEEDING' : statusRoll < 0.7 ? 'TRACED' : 'ACTIVE'
-    const severity: Session['severity'] = statusRoll < 0.3 ? 'high' : statusRoll < 0.7 ? 'medium' : 'low'
-    return {
-        id: ++sid,
-        time: new Date().toLocaleTimeString('en-GB', { hour12: false }),
-        ip,
-        type,
-        status,
-        severity,
+interface ThreatApiLog {
+    threat_id: string
+    network?: {
+        tier?: string
+        threat_score?: number
+        entry_ip?: string
+    }
+    classification?: {
+        attack_type?: string
+    }
+    timeline?: {
+        last_active?: number | string
     }
 }
 
@@ -46,7 +32,6 @@ const MAX = 35
 
 export default function HoneypotSessions() {
     const [sessions, setSessions] = useState<Session[]>([])
-    const containerRef = useRef<HTMLDivElement>(null)
     const { token } = useAuth()
     const [replayId, setReplayId] = useState<string | null>(null)
 
@@ -60,25 +45,28 @@ export default function HoneypotSessions() {
                 })
                 if (!res.ok) return
                 const data = await res.json()
+                const logs = Array.isArray(data?.logs) ? (data.logs as ThreatApiLog[]) : []
 
-                const validLogs = (data.logs || []).filter((l: any) => l.network?.tier !== 'HUMAN')
+                const validLogs = logs.filter((log) => log.network?.tier !== 'HUMAN')
 
-                const sessionMap = validLogs.map((l: any) => {
-                    const statusRoll = l.network?.threat_score || 0
+                const sessionMap = validLogs.map((log) => {
+                    const statusRoll = log.network?.threat_score || 0
                     const status: Session['status'] = statusRoll > 95 ? 'ACTIVE' : statusRoll > 80 ? 'TRACED' : 'FEEDING'
                     const severity: Session['severity'] = statusRoll > 90 ? 'high' : 'medium'
-                    const date = new Date(l.timeline?.last_active || Date.now())
+                    const date = new Date(log.timeline?.last_active || Date.now())
                     return {
-                        id: l.threat_id,
+                        id: log.threat_id,
                         time: date.toLocaleTimeString('en-GB', { hour12: false }),
-                        ip: l.network?.entry_ip || 'UNKNOWN',
-                        type: l.classification?.attack_type || 'UNKNOWN',
+                        ip: log.network?.entry_ip || '—',
+                        type: log.classification?.attack_type
+                            ? log.classification.attack_type
+                            : log.network?.tier === 'BOT' ? 'BOT_PROBE' : 'SUSPICIOUS_TRAFFIC',
                         status,
                         severity,
                     }
                 })
                 setSessions(sessionMap.slice(0, MAX))
-            } catch (err) { }
+            } catch { }
         }
 
         pollSessions()
@@ -110,18 +98,17 @@ export default function HoneypotSessions() {
                 <span className="text-[9px] text-[#00FF41]">{sessions.length} ENTRIES</span>
             </div>
 
-            <div ref={containerRef} className="flex-1 overflow-hidden relative">
+            <div className="flex-1 overflow-hidden relative">
                 {/* Scanline */}
                 <div className="wr-scanline" />
 
                 <div className="flex flex-col">
-                    {sessions.map((s, idx) => (
+                   {sessions.map((s) => (
                         <div
                             key={s.id}
                             className="wr-session-row group cursor-pointer"
                             style={{
-                                borderLeftColor: s.severity === 'high' ? '#FF2020' : 'transparent',
-                                opacity: Math.pow(0.97, idx),
+                                borderLeftColor: s.severity === 'high' ? '#FF2020' : s.severity === 'medium' ? '#FFB800' : 'transparent',
                             }}
                             title={String(s.id).startsWith('TR-') ? 'Click to replay attack sequence' : ''}
                             onClick={() => {
@@ -129,20 +116,23 @@ export default function HoneypotSessions() {
                                 if (sid.startsWith('TR-')) setReplayId(sid)
                             }}
                         >
-                            <span className="text-[#888] w-[60px] flex-shrink-0">{s.time}</span>
-                            <span className="text-[#bbb] w-[105px] flex-shrink-0 truncate">{s.ip}</span>
-                            <span className="text-[#ddd] flex-1 truncate">{s.type}</span>
+                            <span className="text-[#aaaaaa] w-[60px] flex-shrink-0">{s.time}</span>
+                            <span className="text-[#e0e0e0] w-[105px] flex-shrink-0 truncate font-mono">{s.ip}</span>
+                            <span className="text-white flex-1 truncate font-bold tracking-wide">{s.type}</span>
                             <span
-                                className="text-right flex-shrink-0 font-bold"
+                                className="text-right flex-shrink-0 font-bold text-[11px]"
                                 style={{ color: statusColor(s.status) }}
                             >
                                 {statusText(s.status)}
                             </span>
-                            {String(s.id).startsWith('TR-') && (
-                                <span className="ml-2 text-[8px] text-[#00FFD1]/40 group-hover:text-[#00FFD1] transition-colors flex-shrink-0">
-                                    ⏵
-                                </span>
-                            )}
+                            {/* Arrow — was text-[8px], now text-lg and always faintly visible */}
+                            <span className={`ml-3 flex-shrink-0 transition-all duration-150 text-lg leading-none ${
+                                String(s.id).startsWith('TR-')
+                                    ? 'text-[#00FFD1]/50 group-hover:text-[#00FFD1] group-hover:scale-125'
+                                    : 'text-[#ffffff]/10'
+                            }`}>
+                                ▶
+                            </span>
                         </div>
                     ))}
                 </div>

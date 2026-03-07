@@ -1,0 +1,13 @@
+{
+  "network": "celoSepolia",
+  "chainId": 11142220,
+  "deployer": "0x1D88999c8239cC3B75abb4768Ce0105164549440",
+  "deployedAt": "2026-03-07T05:35:19.295Z",
+  "token": {
+    "name": "Test Stable",
+    "symbol": "tSTABLE",
+    "decimals": 18,
+    "initialSupply": "1000000",
+    "address": "0xcD9733D4eC3B007187E27DdB37F0B533165afa9a"
+  }
+}

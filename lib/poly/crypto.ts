@@ -108,7 +108,7 @@ export async function decryptTicket(ticket: string): Promise<string | null> {
         }
 
         return seed
-    } catch (err) {
+    } catch {
         // Decryption failed (tampered ticket or wrong secret)
         return null
     }

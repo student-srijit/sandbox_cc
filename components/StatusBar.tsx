@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 const START_NODES = 14_820
 const START_THREATS = 2_341
 const START_BLOCK = 21_847_301
+const NUMBER_FORMATTER = new Intl.NumberFormat('en-US')
 
 /* ── Animated Counter (simple tween) ─────────────────── */
 function useAnimatedValue(target: number) {
@@ -52,7 +53,7 @@ export default function StatusBar() {
                     const data = await res.json()
                     setNodes(data.count)
                 }
-            } catch (err) { }
+            } catch { }
         }
 
         fetchNodes()
@@ -112,7 +113,7 @@ export default function StatusBar() {
                             className="stat-value-gradient font-bold text-[16px] leading-none mt-0.5 tabular-nums"
                             style={{ fontFamily: 'var(--font-mono)' }}
                         >
-                            {s.value.toLocaleString()}
+                            {NUMBER_FORMATTER.format(s.value)}
                         </span>
                     </div>
                 </div>
@@ -127,7 +128,7 @@ export default function StatusBar() {
                 <span>
                     ETH MAINNET · BLOCK{' '}
                     <span style={{ color: 'var(--cyan)' }}>
-                        {block.toLocaleString()}
+                        {NUMBER_FORMATTER.format(block)}
                     </span>
                 </span>
             </div>

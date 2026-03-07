@@ -1,0 +1,13 @@
+{
+  "network": "celoSepolia",
+  "chainId": 11142220,
+  "deployer": "0x1D88999c8239cC3B75abb4768Ce0105164549440",
+  "deployedAt": "2026-03-07T05:36:23.498Z",
+  "contracts": {
+    "EvidenceAttestation": "0xfEc8072a21489EE832B87b5dfDD60f9fF413Be75",
+    "ReportAccessNFT": "0x0ffFb771Ec41Ac7cE7A17f0c263e4B875fcB73eB",
+    "EnterpriseLicenseNFT": "0x56280229FEbEfD81F91D9CaEEaafed8dfcf4B64e",
+    "BountyEscrow": "0xE1D41D8cff64AD6F75D4Dedd15aFbe0dD5f73039",
+    "StableToken": "0xcD9733D4eC3B007187E27DdB37F0B533165afa9a"
+  }
+}

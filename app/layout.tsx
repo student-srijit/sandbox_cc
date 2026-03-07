@@ -38,6 +38,7 @@ export default function RootLayout({
     <html lang="en" className={`${spaceGrotesk.variable} ${jetbrainsMono.variable}`}>
       <head>
         {/* Load the Dynamically Mutated Session CSS */}
+        {/* eslint-disable-next-line @next/next/no-css-tags */}
         <link rel="stylesheet" href="/api/poly-styles" />
 
         {/* HYDRATION SAFETY: Inject seed as a global. 

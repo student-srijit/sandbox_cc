@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import db, { insertThreatLog } from '@/lib/db'
+import { insertThreatLog } from '@/lib/db'
 import {
     ClientSignals,
     scoreMouseEntropy,
@@ -11,9 +11,42 @@ import {
 } from '@/lib/scoring'
 import { decryptTicket } from '@/lib/poly/crypto'
 
+function isValidClientSignals(input: unknown): input is ClientSignals {
+    if (!input || typeof input !== 'object') return false
+    const data = input as Record<string, unknown>
+
+    const numericFields: Array<keyof ClientSignals> = [
+        'mouseEventsCount',
+        'mousePathLinearity',
+        'mouseSpeedVariance',
+        'pluginsCount',
+        'languagesCount',
+        'screenWidth',
+        'screenHeight',
+        'timeToFirstInteraction',
+    ]
+
+    for (const field of numericFields) {
+        if (typeof data[field] !== 'number' || !Number.isFinite(data[field] as number)) {
+            return false
+        }
+    }
+
+    if (typeof data.webdriver !== 'boolean') return false
+    if (typeof data.hasChromeGlobal !== 'boolean') return false
+    if (typeof data.isChromeUa !== 'boolean') return false
+    if (typeof data.canvasHash !== 'string') return false
+
+    return true
+}
+
 export async function POST(request: NextRequest) {
     try {
-        const signals: ClientSignals = await request.json()
+        const payload: unknown = await request.json()
+        if (!isValidClientSignals(payload)) {
+            return NextResponse.json({ error: 'Invalid telemetry payload structure.' }, { status: 400 })
+        }
+        const signals: ClientSignals = payload
 
         // 1. Calculate Client-Side Score
         const mouseRes = scoreMouseEntropy(signals)
@@ -41,7 +74,7 @@ export async function POST(request: NextRequest) {
                 serverScore = parseInt(parts[0], 10) || 0
                 try {
                     serverDetails = JSON.parse(atob(parts[1]))
-                } catch (e) {
+                } catch {
                     // Ignore parse errors from tampered cookies
                 }
             }
@@ -85,10 +118,31 @@ export async function POST(request: NextRequest) {
             message: `Behavioral analysis complete. Tier assigned: ${tier}`
         })
 
+        const existingSessionId = request.cookies.get('bb-session-id')?.value
+        const derivedSessionId = existingSessionId || sessionHash || `anon-${Date.now()}`
+
         // Set HttpOnly secure cookie for the server to read on subsequent requests
         response.cookies.set({
             name: 'bb-threat-score',
             value: JSON.stringify({ score: finalScore, tier: tier }),
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            path: '/'
+        })
+
+        response.cookies.set({
+            name: 'bb-threat-tier',
+            value: tier,
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            path: '/'
+        })
+
+        response.cookies.set({
+            name: 'bb-session-id',
+            value: derivedSessionId,
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',

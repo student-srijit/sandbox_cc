@@ -15,8 +15,9 @@ const HEX_CHARS = '0123456789ABCDEF'
  * through hex chars before settling on the final value.
  */
 function useScrambleHash(length: number, interval: number) {
-    const [display, setDisplay] = useState(randomHex(length))
-    const targetRef = useRef(randomHex(length))
+    // Deterministic initial value to prevent SSR ↔ Client hydration mismatch
+    const [display, setDisplay] = useState(() => '0x' + '0'.repeat(length))
+    const targetRef = useRef('')
     const scrambleRef = useRef<NodeJS.Timeout | null>(null)
 
     useEffect(() => {

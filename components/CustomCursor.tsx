@@ -23,6 +23,14 @@ export default function CustomCursor() {
         }, 900)
     }, [])
 
+    // Start the dot off-screen so it's hidden until the first mousemove
+    useEffect(() => {
+        if (dotRef.current) {
+            dotRef.current.style.left = '-20px'
+            dotRef.current.style.top = '-20px'
+        }
+    }, [])
+
     useEffect(() => {
         const onMove = (e: MouseEvent) => {
             if (dotRef.current) {

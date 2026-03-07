@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const FASTAPI_URL = 'http://127.0.0.1:8000'
+import { FASTAPI_URL } from '@/lib/backend-config'
 
 export async function GET(
     request: NextRequest,
@@ -23,7 +22,7 @@ export async function GET(
 
         const data = await res.json()
         return NextResponse.json(data)
-    } catch (err) {
+    } catch {
         return NextResponse.json({ error: 'Backend unreachable' }, { status: 502 })
     }
 }

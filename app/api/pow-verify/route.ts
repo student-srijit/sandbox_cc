@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import crypto from 'crypto'
+import { consumePowChallenge } from '@/lib/pow-store'
 
 /**
  * Proof of Work Verifier
@@ -13,6 +14,21 @@ export async function POST(request: NextRequest) {
 
         if (!challenge || nonce === undefined || !difficulty) {
             return NextResponse.json({ error: 'Missing parameters' }, { status: 400 })
+        }
+
+        const record = consumePowChallenge(String(challenge))
+        if (!record) {
+            return NextResponse.json({
+                success: false,
+                error: 'Challenge expired, already used, or unknown. Request a new challenge.'
+            }, { status: 401 })
+        }
+
+        if (record.difficulty !== Number(difficulty)) {
+            return NextResponse.json({
+                success: false,
+                error: 'Challenge difficulty mismatch.'
+            }, { status: 401 })
         }
 
         // Hash the combination
@@ -47,7 +63,7 @@ export async function POST(request: NextRequest) {
             }, { status: 401 })
         }
 
-    } catch (err) {
+    } catch {
         return NextResponse.json({ error: 'Internal verification error' }, { status: 500 })
     }
 }

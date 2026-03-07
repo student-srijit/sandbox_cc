@@ -30,7 +30,7 @@ export default function AttackTaxonomy() {
                 if (data.stats && data.stats.taxonomy) {
                     setAttacks(data.stats.taxonomy)
                 }
-            } catch (err) { }
+            } catch { }
         }
 
         fetchTaxonomy()

@@ -1,61 +1,59 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ThreatContained from './ThreatContained'
+import { useAuth } from '@/components/AuthProvider'
 
-/**
- * Wrapper that manages the Threat Contained overlay state.
- * Auto-triggers after 8 seconds for demo, and provides
- * a manual trigger button in the dashboard header area.
- */
+type ThreatsPayload = {
+  containment?: {
+    active_count?: number
+    containments?: Array<{ threat_id: string | null }>
+  }
+}
+
 export default function ThreatContainedTrigger() {
-    const [open, setOpen] = useState(false)
-    const [isSimulating, setIsSimulating] = useState(false)
-    const [capturedThreatId, setCapturedThreatId] = useState<string | null>(null)
-    useEffect(() => {
-        // Disabled auto-trigger so the manual SIMULATE TRAP button can be used exclusively
-        // const id = setTimeout(() => setOpen(true), 8000)
-        // return () => clearTimeout(id)
-    }, [])
+  const [open, setOpen] = useState(false)
+  const [capturedThreatId, setCapturedThreatId] = useState<string | null>(null)
+  const { token } = useAuth()
+  const lastShownRef = useRef<string | null>(null)
 
-    const handleSimulateAttack = async () => {
-        setIsSimulating(true)
-        try {
-            const res = await fetch('/api/simulate', { method: 'POST' })
-            if (res.ok) {
-                const data = await res.json()
-                if (data.threatId) {
-                    setCapturedThreatId(data.threatId)
-                    setOpen(true)
-                }
-            } else {
-                console.error("Simulation failed:", await res.text())
-            }
-        } catch (err) {
-            console.error(err)
-        } finally {
-            setIsSimulating(false)
-        }
+  useEffect(() => {
+    if (!token) return
+
+    async function pollContainmentState() {
+      try {
+        const res = await fetch('/api/threats', {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        })
+        if (!res.ok) return
+
+        const data = (await res.json()) as ThreatsPayload
+        const containments = data.containment?.containments || []
+        const newestThreatId = containments.find((entry) => !!entry.threat_id)?.threat_id || null
+
+        if (!newestThreatId) return
+        if (lastShownRef.current === newestThreatId) return
+
+        lastShownRef.current = newestThreatId
+        setCapturedThreatId(newestThreatId)
+        setOpen(true)
+      } catch {
+        // Ignore polling hiccups; next interval will retry.
+      }
     }
 
-    return (
-        <>
-            {/* Manual trigger button — fixed in top-left, inside header zone */}
-            {!open && (
-                <button
-                    onClick={handleSimulateAttack}
-                    disabled={isSimulating}
-                    className="fixed top-1.5 left-[340px] z-50 px-3 py-1 text-[7px]
-                     tracking-[0.2em] uppercase text-[#FF2020] border border-[#1a1a1a]
-                     bg-[#0a0a0a] hover:bg-[#111] hover:border-[#FF2020]
-                     transition-all duration-300 rounded-sm"
-                    style={{ fontFamily: 'inherit' }}
-                >
-                    {isSimulating ? '⚠ INJECTING PAYLOAD...' : '⚠ SIMULATE TRAP'}
-                </button>
-            )}
+    pollContainmentState()
+    const id = setInterval(pollContainmentState, 3000)
+    return () => clearInterval(id)
+  }, [token])
 
-            <ThreatContained open={open} onClose={() => setOpen(false)} threatId={capturedThreatId} />
-        </>
-    )
+  return (
+    <ThreatContained
+      open={open}
+      onClose={() => setOpen(false)}
+      threatId={capturedThreatId}
+      token={token}
+    />
+  )
 }

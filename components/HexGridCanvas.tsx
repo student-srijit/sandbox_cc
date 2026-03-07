@@ -59,7 +59,11 @@ export default function HexGridCanvas() {
                 const a = (Math.PI / 180) * (60 * i - 30)
                 const px = x + r * Math.cos(a)
                 const py = y + r * Math.sin(a)
-                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)
+                if (i === 0) {
+                    ctx.moveTo(px, py)
+                } else {
+                    ctx.lineTo(px, py)
+                }
             }
             ctx.closePath()
         }
@@ -167,8 +171,10 @@ export default function HexGridCanvas() {
         }
 
         function resize() {
-            W = canvas.width = window.innerWidth
-            H = canvas.height = window.innerHeight
+            const el = canvasRef.current
+            if (!el) return
+            W = el.width = window.innerWidth
+            H = el.height = window.innerHeight
             buildHexes()
         }
 

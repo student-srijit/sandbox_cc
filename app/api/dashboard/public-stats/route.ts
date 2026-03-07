@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server'
+import { FASTAPI_URL } from '@/lib/backend-config'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
-
-const FASTAPI_URL = 'http://127.0.0.1:8000'
 
 export async function GET() {
     try {
@@ -13,10 +12,22 @@ export async function GET() {
 
         if (apiRes.ok) {
             const data = await apiRes.json()
-            return NextResponse.json(data)
+            return NextResponse.json({
+                ...data,
+                status: 'ok',
+                generatedAt: new Date().toISOString(),
+            })
         }
-        return NextResponse.json({ active_sessions: 0 })
-    } catch (err) {
-        return NextResponse.json({ active_sessions: 0 })
+        return NextResponse.json({
+            active_sessions: 0,
+            status: 'degraded',
+            generatedAt: new Date().toISOString(),
+        })
+    } catch {
+        return NextResponse.json({
+            active_sessions: 0,
+            status: 'degraded',
+            generatedAt: new Date().toISOString(),
+        })
     }
 }

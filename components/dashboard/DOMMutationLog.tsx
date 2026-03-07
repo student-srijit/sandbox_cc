@@ -65,7 +65,7 @@ export default function DOMMutationLog() {
                         // Add DNA nodes for each new mutation, capped at 10 to prevent SVG lag storms
                         const nodesToAdd = Math.min(newMuts, 10)
                         setNodes(prev => {
-                            let nextNodes = [...prev]
+                            const nextNodes = [...prev]
                             for (let i = 0; i < nodesToAdd; i++) {
                                 const newId = ++nodeId
                                 const parentId = nextNodes.length > 0
@@ -92,7 +92,7 @@ export default function DOMMutationLog() {
                         prevTime.current = Date.now()
                     }
                 }
-            } catch (err) { }
+            } catch { }
         }
 
         fetchMutations()

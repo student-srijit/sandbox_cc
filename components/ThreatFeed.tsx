@@ -3,17 +3,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '@/components/AuthProvider'
 
-const THREAT_TYPES = [
-    { type: 'REENTRANCY', css: 'text-[#FF4D00]', border: '#FF4D00' },
-    { type: 'PHISHING', css: 'text-[#FFB800]', border: '#FFB800' },
-    { type: 'FLASH LOAN', css: 'text-[#4A9EFF]', border: '#4A9EFF' },
-    { type: 'HONEYPOT', css: 'text-[#4A9EFF]', border: '#4A9EFF' },
-    { type: 'SANDWICH', css: 'text-[#4A9EFF]', border: '#4A9EFF' },
-    { type: 'RUG PULL', css: 'text-[#FF2020]', border: '#FF2020' },
-    { type: 'MEV BOT', css: 'text-[#00FFD1]', border: '#00FFD1' },
-    { type: 'FRONTRUN', css: 'text-[#7B2FFF]', border: '#7B2FFF' },
-] as const
-
 interface ThreatEntry {
     id: number | string
     type: string
@@ -24,29 +13,20 @@ interface ThreatEntry {
     time: string
 }
 
-let entryId = 0
-
-function rAddr() {
-    return '0x' + Array.from({ length: 8 }, () =>
-        Math.floor(Math.random() * 16).toString(16)
-    ).join('') + '…'
-}
-
-function rTime() {
-    return new Date().toLocaleTimeString('en-GB', { hour12: false })
-}
-
-function makeThreat(): ThreatEntry {
-    const t = THREAT_TYPES[Math.floor(Math.random() * THREAT_TYPES.length)]
-    return {
-        id: ++entryId,
-        type: t.type,
-        css: t.css,
-        border: t.border,
-        from: rAddr(),
-        to: rAddr(),
-        time: rTime(),
+interface ThreatApiLog {
+    threat_id: string
+    network?: {
+        tier?: string
+        threat_score?: number
+        entry_ip?: string
     }
+    timeline?: {
+        last_active?: string
+    }
+}
+
+interface ThreatsApiResponse {
+    logs?: ThreatApiLog[]
 }
 
 const MAX = 25
@@ -60,49 +40,31 @@ export default function ThreatFeed() {
     const { token } = useAuth()
 
     useEffect(() => {
-        if (!token) {
-            // Synthetic demo mode — homepage visitors with no auth see a live-looking feed
-            setEntries([])
-            setBlocked(0)
-            // Seed 2 entries immediately so the panel isn't blank on load
-            setEntries(Array.from({ length: 2 }, () => makeThreat()))
-            setBlocked(2)
-            const synthId = setInterval(() => {
-                setEntries(prev => [makeThreat(), ...prev].slice(0, MAX))
-                setBlocked(prev => prev + 1)
-                setCounterPop(true)
-                setTimeout(() => setCounterPop(false), 300)
-            }, 5000)
-            return () => clearInterval(synthId)
-        }
-
-        // Strict real-time mode: start empty
+        // Always poll — the backend responds without auth, token just grants richer data
         setEntries([])
         setBlocked(0)
 
         async function pollThreats() {
             try {
-                const res = await fetch('/api/threats', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                })
+                const headers: Record<string, string> = {}
+                if (token) headers['Authorization'] = `Bearer ${token}`
+                const res = await fetch('/api/threats', { headers })
                 if (!res.ok) return
-                const data = await res.json()
-                const logs = data.logs.filter((l: any) => l.network?.tier !== 'HUMAN')
+                const data: ThreatsApiResponse = await res.json()
+                const logs = (Array.isArray(data.logs) ? data.logs : []).filter((log) => log.network?.tier !== 'HUMAN')
 
-                const newLogs = logs.filter((l: any) => !knownLiveIds.current.has(l.threat_id))
+                const newLogs = logs.filter((log) => !knownLiveIds.current.has(log.threat_id))
                 if (newLogs.length === 0) return
 
-                // Logs are newest first, we want the newest at [0] when prepended.
-                // So mapped should be in the same order (newest first).
-                const formatted = newLogs.map((l: any) => {
-                    knownLiveIds.current.add(l.threat_id)
-                    const date = new Date(l.timeline?.last_active || Date.now())
-                    const tier = l.network?.tier || 'UNKNOWN'
-                    const score = l.network?.threat_score || 0
-                    const ip = l.network?.entry_ip || 'UNKNOWN'
+                const formatted = newLogs.map((log) => {
+                    knownLiveIds.current.add(log.threat_id)
+                    const date = new Date(log.timeline?.last_active || Date.now())
+                    const tier = log.network?.tier || 'UNKNOWN'
+                    const score = log.network?.threat_score || 0
+                    const ip = log.network?.entry_ip || 'UNKNOWN'
 
                     return {
-                        id: l.threat_id as string,
+                        id: log.threat_id,
                         type: `[${tier}] (SCORE: ${score})`,
                         css: tier === 'BOT' ? 'text-[#FF003C]' : 'text-[#FFD700]',
                         border: tier === 'BOT' ? '#FF003C' : '#FFD700',
@@ -117,7 +79,7 @@ export default function ThreatFeed() {
 
                 setCounterPop(true)
                 setTimeout(() => setCounterPop(false), 300)
-            } catch (err) { }
+            } catch { }
         }
         const pollId = setInterval(pollThreats, 1500)
         pollThreats()
@@ -167,6 +129,14 @@ export default function ThreatFeed() {
             {/* Feed entries */}
             <div className="flex-1 overflow-hidden relative z-10">
                 <div className="flex flex-col">
+                    {entries.length === 0 && (
+                        <div className="flex flex-col items-center justify-center h-40 gap-2 opacity-40">
+                            <div className="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse" />
+                            <span className="text-[7px] tracking-[0.25em] uppercase font-mono" style={{ color: 'var(--text-dim)' }}>
+                                Monitoring...
+                            </span>
+                        </div>
+                    )}
                     {entries.map((entry, idx) => (
                         <div
                             key={entry.id}
@@ -216,7 +186,7 @@ export default function ThreatFeed() {
                                                 btn.innerText = 'DEPLOYED'
                                                 btn.classList.add('bg-[#1a1a1a]', 'text-[#FFD700]', 'border-[#FFD700]')
                                             }
-                                        } catch (e) { }
+                                        } catch { }
                                     }}
                                     id={`tarpit-btn-${entry.id}`}
                                     className="px-2 py-0.5 text-[6px] tracking-widest font-bold border border-white/20 hover:border-white hover:bg-white hover:text-black transition-colors rounded-[2px]"
@@ -241,7 +211,7 @@ export default function ThreatFeed() {
                                                 btn.innerText = 'INJECTED'
                                                 btn.classList.add('bg-[#FF003C]', 'text-white', 'border-transparent')
                                             }
-                                        } catch (e) { }
+                                        } catch { }
                                     }}
                                     id={`poison-btn-${entry.id}`}
                                     className="px-2 py-0.5 text-[6px] tracking-widest font-bold border border-[#FF003C]/30 text-[#FF003C] hover:border-[#FF003C] hover:bg-[#FF003C]/10 transition-colors rounded-[2px]"

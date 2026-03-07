@@ -21,7 +21,7 @@ export async function GET() {
         initFile()
         const data = JSON.parse(fs.readFileSync(dbPath, 'utf8'))
         return NextResponse.json(data)
-    } catch (err) {
+    } catch {
         return NextResponse.json({ count: START_NODES })
     }
 }
@@ -33,7 +33,7 @@ export async function POST() {
         data.count += 1
         fs.writeFileSync(dbPath, JSON.stringify(data, null, 2))
         return NextResponse.json({ success: true, count: data.count })
-    } catch (err) {
+    } catch {
         return NextResponse.json({ error: 'Failed to update nodes' }, { status: 500 })
     }
 }

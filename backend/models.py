@@ -70,6 +70,11 @@ class AttackClassification(BaseModel):
     sophistication: str
     inferred_toolchain: str
     confidence: float
+    # SOC-Grade Explainability fields (populated by containment module)
+    attack_technique_id: Optional[str] = None    # MITRE ATT&CK ID, e.g. "T1046"
+    attack_technique_name: Optional[str] = None  # Human-readable technique name
+    attack_tactic: Optional[str] = None          # ATT&CK tactic phase
+    trigger_reason: Optional[str] = None         # Why this alert was raised
 
 class PayloadLog(BaseModel):
     """Individual requests made by an attacker."""

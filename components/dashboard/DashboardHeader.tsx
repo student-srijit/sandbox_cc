@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useAuth } from '@/components/AuthProvider'
 
 export default function DashboardHeader() {
     const [time, setTime] = useState('')
     const [uptime, setUptime] = useState(0)
+    const { logout } = useAuth()
 
     useEffect(() => {
         const tick = () => {
@@ -26,7 +28,7 @@ export default function DashboardHeader() {
                     BHOOL BHULAIYAA
                 </span>
                 <span className="text-[9px] text-[#555] tracking-[0.15em]">
-          //
+                      {'//'}
                 </span>
                 <span className="text-[9px] text-[#999] tracking-[0.15em] uppercase">
                     Threat Intelligence Center
@@ -49,6 +51,12 @@ export default function DashboardHeader() {
                 <span className="text-[#777]">
                     UPTIME {fmtUptime}
                 </span>
+                <button
+                    onClick={logout}
+                    className="text-[9px] text-[#444] hover:text-[#FF2020] tracking-widest uppercase transition-colors border border-[#222] hover:border-[#FF2020]/40 px-2 py-1"
+                >
+                    LOGOUT
+                </button>
             </div>
         </header>
     )

@@ -1,6 +1,6 @@
 'use client'
 
-import { forwardRef, useEffect, useState, useRef } from 'react'
+import { forwardRef } from 'react'
 
 /**
  * Triangle sentinels that oscillate inward/outward with offset phases.

@@ -1,0 +1,13 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "deployer": "0x1D88999c8239cC3B75abb4768Ce0105164549440",
+  "deployedAt": "2026-03-07T06:08:48.920Z",
+  "contracts": {
+    "EvidenceAttestation": "0xcD9733D4eC3B007187E27DdB37F0B533165afa9a",
+    "ReportAccessNFT": "0xfEc8072a21489EE832B87b5dfDD60f9fF413Be75",
+    "EnterpriseLicenseNFT": "0x0ffFb771Ec41Ac7cE7A17f0c263e4B875fcB73eB",
+    "BountyEscrow": "0x56280229FEbEfD81F91D9CaEEaafed8dfcf4B64e",
+    "StableToken": "0xcD9733D4eC3B007187E27DdB37F0B533165afa9a"
+  }
+}

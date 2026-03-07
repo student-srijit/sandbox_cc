@@ -49,15 +49,58 @@ class HoneypotEngine:
 
         # 1.5 ACTIVE DEFENSE INTERCEPT (THE KILL SWITCHES)
         # --------------------------------------------------------------------
-        active_weapon = ws_manager.active_defenses.get(ip)
-        if active_weapon == "TAR_PIT":
+        from containment import containment, ContainmentMode
+
+        # Check both legacy world_state defenses AND the new containment orchestrator
+        legacy_weapon = ws_manager.active_defenses.get(ip)
+        containment_mode = containment.get_mode(ip) or legacy_weapon
+
+        if containment_mode == ContainmentMode.TAR_PIT or containment_mode == "TAR_PIT":
             # Tactic: Tarpitting. 
             # We exhaust the attacker's connection pool by intentionally 
             # hanging their request for 30 seconds before doing anything else.
             print(f"[{ip}] 🛡️ TAR_PIT ENGAGED. Hanging thread for 30s...")
             await asyncio.sleep(30.0)
-            
-        elif active_weapon == "POISONED_ABI":
+
+        elif containment_mode == ContainmentMode.QUARANTINE or containment_mode == "QUARANTINE":
+            # Tactic: Complete quarantine.
+            # The attacker receives an empty success response in a tight loop
+            # with no useful data, trapping them in their own retry logic.
+            print(f"[{ip}] 🔒 QUARANTINE ENGAGED. Returning empty responses...")
+            await asyncio.sleep(2.0)
+            return {"jsonrpc": "2.0", "result": None, "id": None}
+
+        elif containment_mode == ContainmentMode.SHADOW_BAN or containment_mode == "SHADOW_BAN":
+            # Tactic: Silent data poisoning.
+            # Return plausible-looking but entirely fabricated data.
+            # The attacker thinks they succeeded; their exfiltrated data is worthless.
+            print(f"[{ip}] 👻 SHADOW_BAN ENGAGED. Serving poisoned data silently...")
+            import secrets as _sec
+            return {
+                "jsonrpc": "2.0",
+                "result": "0x" + _sec.token_hex(32),  # fake tx hash / fake key
+                "id": None
+            }
+
+        elif containment_mode == ContainmentMode.SINKHOLE or containment_mode == "SINKHOLE":
+            # Tactic: Infinite loop sinkhole.
+            # Each request is delayed and redirects the attacker deeper into the honeypot
+            # by returning an address that points to the next "bait" contract.
+            print(f"[{ip}] 🌀 SINKHOLE ENGAGED. Routing attacker into infinite loop...")
+            await asyncio.sleep(1.5)
+            sinkhole_addresses = [
+                "0xDeadBeef00000000000000000000000000000001",
+                "0xDeadBeef00000000000000000000000000000002",
+                "0xDeadBeef00000000000000000000000000000003",
+            ]
+            import random as _rand
+            return {
+                "jsonrpc": "2.0",
+                "result": _rand.choice(sinkhole_addresses),
+                "id": None
+            }
+
+        elif containment_mode == ContainmentMode.POISONED_ABI or containment_mode == "POISONED_ABI":
             # Tactic: Buffer Overflow / Parser Denial of Service.
             # We return an infinitely recursive JSON object that crashes poorly 
             # written JS/Python scraper dictionaries on the attacker's end.
@@ -73,6 +116,8 @@ class HoneypotEngine:
                 "result": bomb,
                 "id": "fatal_overflow"
             }
+
+        # CRITICAL_INCIDENT doesn't alter response behaviour — it only changes UI state
 
         # 2. Extract standard JSON-RPC ID for response matching
         req_id = None

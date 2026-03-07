@@ -168,6 +168,8 @@ async function attack(name: string, description: string, path: string, headers: 
 
             console.log(`    [*] INJECTING      >> Sending fake payload sequence to backend: [${sequence.join(', ')}] (Simulating IP: ${randomIp})`)
 
+            const sessionId = 'sim-' + Date.now().toString() + '-' + Math.random().toString(36).slice(2, 6)
+
             for (let i = 0; i < sequence.length; i++) {
                 const method = sequence[i]
                 let params: any[] = []
@@ -188,7 +190,7 @@ async function attack(name: string, description: string, path: string, headers: 
                         'Content-Type': 'application/json',
                         'X-BB-Threat-Score': result.score.toString(),
                         'X-BB-Tier': result.tier,
-                        'X-BB-Session': 'simulated-session-' + Date.now().toString(),
+                        'X-BB-Session': sessionId,
                         'X-Forwarded-For': randomIp,
                         ...headers,
                     },
@@ -204,7 +206,10 @@ async function attack(name: string, description: string, path: string, headers: 
                 await delay(200)
             }
 
-            console.log(`    [✓] INJECTED       >> Backend ingested sequence.\n`)
+            // 5. Flush the session so the threat record persists to the DB and appears in the feed
+            await fetch('http://localhost:8000/api/flush', { method: 'POST' }).catch(() => {})
+
+            console.log(`    [✓] INJECTED       >> Backend ingested & flushed sequence.\n`)
 
         } else if (result.tier === 'SUSPICIOUS') {
             console.log(`    [?] DETERMINATION  >> SUSPICIOUS PROXY.`)

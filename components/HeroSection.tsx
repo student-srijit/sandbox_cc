@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useRef, useEffect } from 'react'
 import MazeSVG from './MazeSVG'
 import ConnectWallet from './ConnectWallet'
@@ -43,7 +44,16 @@ export default function HeroSection() {
             </div>
 
             {/* Connect Wallet — sits above maze at center */}
-            <ConnectWallet />
+            <div className="flex flex-col items-center gap-6 z-10">
+                <ConnectWallet />
+                <Link
+                    href="/dashboard"
+                    className="group relative px-8 py-3 text-[11px] tracking-[0.35em] uppercase font-bold border-2 border-[#FF2020] text-[#FF2020] bg-[#FF2020]/10 hover:bg-[#FF2020]/25 hover:text-white transition-all shadow-[0_0_20px_rgba(255,32,32,0.3)] hover:shadow-[0_0_35px_rgba(255,32,32,0.55)] animate-pulse"
+                    style={{ animationDuration: '2.5s' }}
+                >
+                    <span className="mr-2">🛡</span> ENTER WAR ROOM
+                </Link>
+            </div>
         </section>
     )
 }

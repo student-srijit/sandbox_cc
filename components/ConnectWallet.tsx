@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { usePolyClass } from '@/components/poly/PolyProvider'
 import { useWallet } from './WalletProvider'
 
@@ -113,8 +113,6 @@ export default function ConnectWallet() {
 
         const RING_RADII = [60, 85, 115] // inner, mid, outer
         const RING_SPEEDS = [0.6, -0.4, 0.22] // fast CW, med CCW, slow CW
-        const RING_DASH = ['4 6', '6 8', '8 12']
-
         const els = Array.from(container.querySelectorAll('.orbit-particle')) as HTMLDivElement[]
         const W = 240, H = 240
         const cx = W / 2, cy = H / 2
@@ -130,8 +128,6 @@ export default function ConnectWallet() {
             angleRef.current += 1
 
             const radiusMult = targetRadiusRef.current
-            const bootMult = !document.querySelector('.booted') ? 0 : 1
-
             els.forEach((el, i) => {
                 const p = particles.current[i]
                 const speed = RING_SPEEDS[p.ring]
@@ -176,7 +172,7 @@ export default function ConnectWallet() {
                 if (threatData.tier === 'SUSPICIOUS' && !threatData.verifiedPow) {
                     shouldChallenge = true
                 }
-            } catch (e) {
+            } catch {
                 // Parse error, proceed carefully
             }
         }
@@ -228,28 +224,8 @@ export default function ConnectWallet() {
         console.log('[Connecting] Firing Ethereum provider request...')
         await connectWallet() // This triggers the MetaMask extension
 
-        // Maintain the dummy ping for the dashboard threat mapper if they 
-        // fallback or just explicitly tested the honeypot
-        fetch('/api/rpc', {
-            method: 'POST',
-            headers: {
-                'X-Force-Bot': 'true',
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                jsonrpc: "2.0",
-                method: "eth_sendRawTransaction",
-                params: ["0xf86b018..."],
-                id: 1
-            })
-        }).catch(() => { })
-
         setTimeout(() => {
             window.dispatchEvent(new Event('wallet-connect'))
-            // For Demo Purposes: flush the engine
-            setTimeout(() => {
-                fetch('http://localhost:8000/api/flush', { method: 'POST' }).catch(() => { })
-            }, 1000)
         }, 600)
     }
 

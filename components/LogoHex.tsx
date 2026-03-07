@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 const LOGO_TEXT = 'BHOOL BHULAIYAA'
@@ -48,7 +49,7 @@ function HexLetterCell({ char, index }: { char: string; index: number }) {
 
 export default function LogoHex() {
     return (
-        <div className="flex items-center gap-0.5">
+        <Link href="/" className="flex items-center gap-0.5 no-underline">
             <div className="flex items-center gap-0.5">
                 {LOGO_TEXT.split('').map((char, i) => (
                     <HexLetterCell key={i} char={char} index={i} />
@@ -60,6 +61,6 @@ export default function LogoHex() {
             >
                 Web3 Security Shield
             </span>
-        </div>
+        </Link>
     )
 }

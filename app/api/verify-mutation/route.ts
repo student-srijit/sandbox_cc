@@ -35,7 +35,6 @@ export async function GET(request: NextRequest) {
 
         const mutationMap = getMutationMap(seed)
 
-        // Parse out the original TTL if needed, though we just show a demo response here
         const sessionHashStr = seed.substring(0, 16).toUpperCase()
 
         return NextResponse.json({
@@ -44,10 +43,10 @@ export async function GET(request: NextRequest) {
             seedLengthBytes: seed.length / 2, // hex string
             mutationsPerformed: Object.keys(mutationMap).length,
             mutationMap,
-            verificationNote: 'This JSON proves the class selectors have been randomized for this specific session.'
+            verificationNote: 'Session selectors are randomized and stable per ticket, which validates active polymorphic shielding.'
         })
 
-    } catch (error) {
+    } catch {
         return NextResponse.json({ error: 'Internal verification error' }, { status: 500 })
     }
 }
