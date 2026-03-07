@@ -31,19 +31,35 @@ export async function GET(request: NextRequest) {
 
         // 2. Read the secure session ticket
         const ticket = request.cookies.get('bb-poly-ticket')?.value
+        const seedFromQuery = request.nextUrl.searchParams.get('seed')
 
         if (!ticket) {
-            // No ticket -> Bot or expired session without middleware run.
-            // Serve unmodified fallback CSS to gracefully degrade.
+            // First paint can race cookie propagation in some browsers.
+            // If SSR sent a seed via query string, use it to keep class names aligned.
+            if (isValidSeed(seedFromQuery)) {
+                const mutationMap = getMutationMap(seedFromQuery)
+                for (const semanticClass of POLY_CLASSES) {
+                    const mutatedClass = mutationMap[semanticClass]
+                    const regex = new RegExp(`\\.${semanticClass}\\b`, 'g')
+                    styles = styles.replace(regex, `.${mutatedClass}`)
+                }
+                return serveCSS(styles, true)
+            }
+
+            // No usable seed -> graceful fallback
             return serveCSS(styles, false)
         }
 
         // 3. Decrypt and validate ticket
-        const seed = await decryptTicket(ticket)
+        let seed = await decryptTicket(ticket)
 
         if (!seed) {
-            // Invalid or expired ticket -> Fallback CSS
-            return serveCSS(styles, false)
+            // Invalid/expired ticket: if SSR seed is present, use it as fallback.
+            if (isValidSeed(seedFromQuery)) {
+                seed = seedFromQuery
+            } else {
+                return serveCSS(styles, false)
+            }
         }
 
         // 4. Generate mutation mapping for this specific session
@@ -70,6 +86,10 @@ export async function GET(request: NextRequest) {
             headers: { 'Content-Type': 'text/css' }
         })
     }
+}
+
+function isValidSeed(seed: string | null): seed is string {
+    return typeof seed === 'string' && /^[a-f0-9]{64}$/i.test(seed)
 }
 
 /**

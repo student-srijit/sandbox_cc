@@ -59,7 +59,11 @@ async function main() {
     let envText = fs.readFileSync(envPath, "utf8");
     envText = upsertEnv(envText, "STABLE_TOKEN_ADDRESS", tokenAddress);
     if (chainId === 11142220) {
-      envText = upsertEnv(envText, "NEXT_PUBLIC_CELO_STABLE_TOKEN", tokenAddress);
+      envText = upsertEnv(
+        envText,
+        "NEXT_PUBLIC_CELO_STABLE_TOKEN",
+        tokenAddress,
+      );
     }
     if (chainId === 11155111) {
       envText = upsertEnv(

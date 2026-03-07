@@ -18,7 +18,10 @@ function cleanupExpiredChallenges(now = Date.now()): void {
   }
 }
 
-export function createPowChallenge(difficulty: number, ttlMs = DEFAULT_TTL_MS): PowChallenge {
+export function createPowChallenge(
+  difficulty: number,
+  ttlMs = DEFAULT_TTL_MS,
+): PowChallenge {
   cleanupExpiredChallenges();
 
   const challenge = crypto.randomBytes(16).toString("hex");

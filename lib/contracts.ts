@@ -40,18 +40,22 @@ function isAddressLike(value: string): boolean {
 function envContracts(chain: SupportedChain): EnvContractSet {
   if (chain === 11155111) {
     return {
-      evidenceAttestation: process.env.NEXT_PUBLIC_SEPOLIA_EVIDENCE_ATTESTATION ?? "",
+      evidenceAttestation:
+        process.env.NEXT_PUBLIC_SEPOLIA_EVIDENCE_ATTESTATION ?? "",
       reportAccessNFT: process.env.NEXT_PUBLIC_SEPOLIA_REPORT_ACCESS_NFT ?? "",
-      enterpriseLicenseNFT: process.env.NEXT_PUBLIC_SEPOLIA_ENTERPRISE_LICENSE_NFT ?? "",
+      enterpriseLicenseNFT:
+        process.env.NEXT_PUBLIC_SEPOLIA_ENTERPRISE_LICENSE_NFT ?? "",
       bountyEscrow: process.env.NEXT_PUBLIC_SEPOLIA_BOUNTY_ESCROW ?? "",
       stableToken: process.env.NEXT_PUBLIC_SEPOLIA_STABLE_TOKEN ?? "",
     };
   }
 
   return {
-    evidenceAttestation: process.env.NEXT_PUBLIC_CELO_EVIDENCE_ATTESTATION ?? "",
+    evidenceAttestation:
+      process.env.NEXT_PUBLIC_CELO_EVIDENCE_ATTESTATION ?? "",
     reportAccessNFT: process.env.NEXT_PUBLIC_CELO_REPORT_ACCESS_NFT ?? "",
-    enterpriseLicenseNFT: process.env.NEXT_PUBLIC_CELO_ENTERPRISE_LICENSE_NFT ?? "",
+    enterpriseLicenseNFT:
+      process.env.NEXT_PUBLIC_CELO_ENTERPRISE_LICENSE_NFT ?? "",
     bountyEscrow: process.env.NEXT_PUBLIC_CELO_BOUNTY_ESCROW ?? "",
     stableToken: process.env.NEXT_PUBLIC_CELO_STABLE_TOKEN ?? "",
   };
@@ -62,9 +66,11 @@ export function getContractsForChain(chain: SupportedChain): ContractSet {
   const env = envContracts(chain);
 
   return {
-    evidenceAttestation: env.evidenceAttestation || configured.evidenceAttestation,
+    evidenceAttestation:
+      env.evidenceAttestation || configured.evidenceAttestation,
     reportAccessNFT: env.reportAccessNFT || configured.reportAccessNFT,
-    enterpriseLicenseNFT: env.enterpriseLicenseNFT || configured.enterpriseLicenseNFT,
+    enterpriseLicenseNFT:
+      env.enterpriseLicenseNFT || configured.enterpriseLicenseNFT,
     bountyEscrow: env.bountyEscrow || configured.bountyEscrow,
     stableToken: env.stableToken || configured.stableToken,
   };

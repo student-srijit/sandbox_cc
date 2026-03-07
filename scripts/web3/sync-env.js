@@ -87,12 +87,15 @@ function main() {
   };
 
   for (const deployment of deployments) {
-    manifest.deployments[String(deployment.chainId)] = toManifestEntry(deployment);
+    manifest.deployments[String(deployment.chainId)] =
+      toManifestEntry(deployment);
   }
 
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2), "utf8");
 
-  let envContent = fs.existsSync(ENV_PATH) ? fs.readFileSync(ENV_PATH, "utf8") : "";
+  let envContent = fs.existsSync(ENV_PATH)
+    ? fs.readFileSync(ENV_PATH, "utf8")
+    : "";
 
   for (const deployment of deployments) {
     const keys = ENV_KEYS[deployment.chainId];

@@ -37,9 +37,10 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${spaceGrotesk.variable} ${jetbrainsMono.variable}`}>
       <head>
-        {/* Load the Dynamically Mutated Session CSS */}
+        {/* Load the dynamically mutated session CSS.
+          Include the current SSR seed so first paint never races cookie propagation. */}
         {/* eslint-disable-next-line @next/next/no-css-tags */}
-        <link rel="stylesheet" href="/api/poly-styles" />
+        <link rel="stylesheet" href={seed ? `/api/poly-styles?seed=${seed}` : '/api/poly-styles'} />
 
         {/* HYDRATION SAFETY: Inject seed as a global. 
             Runs immediately on parse, BEFORE React JS initializes. */}

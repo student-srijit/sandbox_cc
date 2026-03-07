@@ -83,7 +83,9 @@ async function main() {
   fs.writeFileSync(deploymentsFile, JSON.stringify(deploymentData, null, 2));
   console.log(`\nDeployment data saved to: ${deploymentsFile}`);
 
-  console.log("\nRun `npm run web3:sync-env` to update NEXT_PUBLIC_* contract addresses.");
+  console.log(
+    "\nRun `npm run web3:sync-env` to update NEXT_PUBLIC_* contract addresses.",
+  );
 
   console.log("\n=== Deployment Summary ===");
   console.log(`EvidenceAttestation=${evidenceAttestationAddr}`);

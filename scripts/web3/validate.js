@@ -28,7 +28,9 @@ const NETWORK_CONFIG = {
 function parseArgs() {
   const idx = process.argv.indexOf("--network");
   if (idx === -1 || !process.argv[idx + 1]) {
-    throw new Error("Usage: node scripts/web3/validate.js --network <sepolia|celoSepolia|celoAlfajores>");
+    throw new Error(
+      "Usage: node scripts/web3/validate.js --network <sepolia|celoSepolia|celoAlfajores>",
+    );
   }
 
   const network = process.argv[idx + 1];
@@ -63,13 +65,13 @@ async function main() {
   const { network, config } = parseArgs();
   const primaryPath = path.join(DATA_DIR, config.fileName);
   const legacyPath = path.join(DATA_DIR, "deployments.celoAlfajores.json");
-  const isCeloNetwork = network === "celoSepolia" || network === "celoAlfajores";
-  const deploymentPath =
-    fs.existsSync(primaryPath)
-      ? primaryPath
-      : isCeloNetwork
-        ? legacyPath
-        : primaryPath;
+  const isCeloNetwork =
+    network === "celoSepolia" || network === "celoAlfajores";
+  const deploymentPath = fs.existsSync(primaryPath)
+    ? primaryPath
+    : isCeloNetwork
+    ? legacyPath
+    : primaryPath;
   const deployment = readDeployment(deploymentPath);
 
   if (Number(deployment.chainId) !== config.chainId) {

@@ -61,4 +61,6 @@ export function getBotStats() {
   }
 }
 
-export default {}
+const db = {}
+
+export default db

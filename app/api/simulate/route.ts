@@ -46,6 +46,9 @@ export async function POST() {
     return NextResponse.json({ success: true, sessionId });
   } catch (error) {
     console.error("Failed to execute simulated trap sequence:", error);
-    return NextResponse.json({ error: "Internal sequence failure" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal sequence failure" },
+      { status: 500 },
+    );
   }
 }
