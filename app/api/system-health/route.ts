@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { FASTAPI_URL } from "@/lib/backend-config";
+import { FASTAPI_URL, fetchFastAPI } from "@/lib/backend-config";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -16,7 +16,7 @@ async function probeBackend(): Promise<{
 }> {
   const start = Date.now();
   try {
-    const res = await fetch(`${FASTAPI_URL}/api/health`, {
+    const res = await fetchFastAPI(`/api/health`, {
       signal: AbortSignal.timeout(2500),
     });
     return { ok: res.ok, latencyMs: Date.now() - start };
@@ -27,7 +27,7 @@ async function probeBackend(): Promise<{
 
 async function probePublicStats(): Promise<{ activeSessions: number | null }> {
   try {
-    const res = await fetch(`${FASTAPI_URL}/api/dashboard/public-stats`, {
+    const res = await fetchFastAPI(`/api/dashboard/public-stats`, {
       signal: AbortSignal.timeout(2500),
     });
     if (!res.ok) return { activeSessions: null };

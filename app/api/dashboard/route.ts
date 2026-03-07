@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FASTAPI_URL } from "@/lib/backend-config";
+import { FASTAPI_URL, fetchFastAPI } from "@/lib/backend-config";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -7,16 +7,22 @@ export const revalidate = 0;
 export async function GET(req: NextRequest) {
   try {
     const authHeader = req.headers.get("Authorization") || "";
+    const csrfCookie = req.cookies.get("bb_csrf_token");
 
     if (!authHeader.startsWith("Bearer ")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    
+    const headers: Record<string, string> = {
+      Authorization: authHeader,
+      "Content-Type": "application/json",
+    };
+    if (csrfCookie) {
+      headers["Cookie"] = `bb_csrf_token=${csrfCookie.value}`;
+    }
 
-    const apiRes = await fetch(`${FASTAPI_URL}/api/dashboard`, {
-      headers: {
-        Authorization: authHeader,
-        "Content-Type": "application/json",
-      },
+    const apiRes = await fetchFastAPI(`/api/dashboard`, {
+      headers,
       cache: "no-store",
       signal: AbortSignal.timeout(3000),
     });

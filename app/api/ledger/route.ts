@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { FASTAPI_URL } from "@/lib/backend-config";
+import { FASTAPI_URL, fetchFastAPI } from "@/lib/backend-config";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET() {
   try {
-    const apiRes = await fetch(`${FASTAPI_URL}/api/ledger`, {
+    const apiRes = await fetchFastAPI(`/api/ledger`, {
       method: "GET",
       cache: "no-store",
     });

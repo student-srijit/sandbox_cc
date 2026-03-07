@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import fs from 'fs'
 import path from 'path'
-import { FASTAPI_URL } from '@/lib/backend-config'
+import { FASTAPI_URL, fetchFastAPI } from "@/lib/backend-config";
 
 export const runtime = 'nodejs'
 
@@ -25,7 +25,7 @@ async function isAuthorized(authHeader: string): Promise<boolean> {
     }
 
     try {
-        const res = await fetch(`${FASTAPI_URL}/api/dashboard`, {
+        const res = await fetchFastAPI(`/api/dashboard`, {
             headers: {
                 Authorization: authHeader,
                 'Content-Type': 'application/json',

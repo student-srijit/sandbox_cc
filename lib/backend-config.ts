@@ -20,3 +20,27 @@ export function getFastApiUrl(): string {
 }
 
 export const FASTAPI_URL = getFastApiUrl();
+
+import { generateHmacHeaders } from '@/lib/security';
+
+/**
+ * Centrally wraps requests to the FastAPI backend to auto-inject the X-BB-Signature 
+ * HMAC Authentication required for zero-trust proxy communication.
+ */
+export async function fetchFastAPI(path: string, options: RequestInit = {}): Promise<Response> {
+  const url = `${FASTAPI_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+  
+  let bodyStr = "";
+  if (options.body && typeof options.body === "string") {
+    bodyStr = options.body;
+  }
+  
+  const hmacHeaders = await generateHmacHeaders(bodyStr);
+  
+  options.headers = {
+    ...options.headers,
+    ...hmacHeaders
+  };
+  
+  return fetch(url, options);
+}

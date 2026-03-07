@@ -63,6 +63,85 @@ AWS_REGION=us-east-1
 S3_BUCKET_NAME=bb-prod-backups-secure-2024
 """
 
+# Additional fake secret files to trap reconnaissance scripts.
+FAKE_GIT_CONFIG_RESPONSE = """
+[core]
+        repositoryformatversion = 0
+        filemode = true
+        bare = false
+        logallrefupdates = true
+[remote \"origin\"]
+        url = https://ghp_9mA7x2qf7cK1Rk2A8vLQfYdXnD0wA9EXAMPLE@github.com/acme/crown-jewel.git
+        fetch = +refs/heads/*:refs/remotes/origin/*
+[branch \"main\"]
+        remote = origin
+        merge = refs/heads/main
+"""
+
+FAKE_AWS_CREDENTIALS_RESPONSE = """
+[default]
+aws_access_key_id = AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+region = us-east-1
+
+[prod-admin]
+aws_access_key_id = AKIAT3STSECURITYFAKE
+aws_secret_access_key = 8YfQ0z8mW1dA3x9lK2pN7hV5bR4uQ1tZEXAMPLE
+region = eu-west-1
+"""
+
+FAKE_WP_CONFIG_RESPONSE = """
+<?php
+define('DB_NAME', 'wp_prod');
+define('DB_USER', 'wp_admin');
+define('DB_PASSWORD', 'A9xkQm2vP4tR7sL1');
+define('DB_HOST', '10.12.9.44');
+define('AUTH_KEY', 'faKE-auTh-kEy-2026-long-string');
+define('SECURE_AUTH_KEY', 'faKE-seCuRe-auTh-kEy-2026-long-string');
+define('LOGGED_IN_KEY', 'faKE-loGGed-in-kEy-2026-long-string');
+define('NONCE_KEY', 'faKE-noNce-kEy-2026-long-string');
+?>
+"""
+
+FAKE_DOCKER_COMPOSE_RESPONSE = """
+version: '3.9'
+services:
+    app:
+        image: registry.internal/acme-admin:2026.03.01
+        environment:
+            - JWT_SECRET=prod-jwt-secret-rotated-weekly
+            - DATABASE_URL=postgres://admin:K9mQp2LxR@postgres:5432/prod
+            - REDIS_URL=redis://:S3cr3tPass@redis:6379/0
+        ports:
+            - "8080:8080"
+"""
+
+FAKE_PRIVATE_KEY_RESPONSE = """
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAlwAAAAdzc2gtcn
+NhAAAAAwEAAQAAAIEA1wqE5W4zQx9nO7kVY2D8x3cQmA6k2f7oQf0G3i7VQ2t5nZPq7m8d
+W0xV6cQ3Y9f8S1gkR2m1yJ7lA9dQ6v3nM2pT5yL8wB3fS4xZ9uE6qR3dX8mN1kJ2pL6rV4
+zY0kQ3pV7nF2mD9xS8bA5cN6wE7rQ8tY1uI2oP3lM4nQ5rS6tU7vW8xY9z0AAABiYXR0YWN
+rZXJfYmFpdF9rZXkAAAAHc3NoLXJzYQAAAIEA1wqE5W4zQx9nO7kVY2D8x3cQmA6k2f7oQ
+f0G3i7VQ2t5nZPq7m8dW0xV6cQ3Y9f8S1gkR2m1yJ7lA9dQ6v3nM2pT5yL8wB3fS4xZ9uE6
+qR3dX8mN1kJ2pL6rV4zY0kQ3pV7nF2mD9xS8bA5cN6wE7rQ8tY1uI2oP3lM4nQ5rS6tU7vW
+8xY9z0AAAADAQABAAAAgQCZk4mP8qQ1rF7vL2xN5tJ9wE3sD6yH8mB4qR1uV7nC2pX5tK
+9yQ6wE2rM8nL4fD1sG7hJ3kP5qR9tV2wX6yZ0aB3cD7eF1gH5jK9lM2nP6qR0sT4uV8wX2
+Y6zA0bC4dE8fG2hJ6kL0mN4pQ8rS2tU6vX0yZ3aB7cD1eF5gH9iJ3kL7mN1oQ==
+-----END OPENSSH PRIVATE KEY-----
+"""
+
+FAKE_FILE_RESPONSES = {
+        ".env": FAKE_ENV_RESPONSE,
+        ".env.local": FAKE_ENV_RESPONSE,
+        ".git/config": FAKE_GIT_CONFIG_RESPONSE,
+        ".aws/credentials": FAKE_AWS_CREDENTIALS_RESPONSE,
+        "wp-config.php": FAKE_WP_CONFIG_RESPONSE,
+        "config.php": FAKE_WP_CONFIG_RESPONSE,
+        "docker-compose.yml": FAKE_DOCKER_COMPOSE_RESPONSE,
+        "id_rsa": FAKE_PRIVATE_KEY_RESPONSE,
+}
+
 # Common attack payloads to look out for
 SQL_INJECTION_PATTERNS = [
     "' OR '1'='1",

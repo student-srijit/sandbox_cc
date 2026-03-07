@@ -41,6 +41,8 @@ backend/__pycache__/
 backend/*.pyc
 backend/data/honeypot.db
 backend/data/*.db
+backend/data/security_audit.log
+backend/data/*.log
 backend/backend_test.log
 backend/.env
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { encryptE2EERequest } from "@/lib/security";
 
 interface ThreatEntry {
   id: number | string;
@@ -268,16 +269,19 @@ export default function ThreatFeed() {
                     onClick={async () => {
                       if (!token) return;
                       try {
+                        const rawPayload = JSON.stringify({
+                            ip_address: entry.from,
+                            defense_type: "TAR_PIT",
+                        });
+                        const encryptedPayload = await encryptE2EERequest(rawPayload);
+                          
                         await fetch("/api/dashboard/defend", {
                           method: "POST",
                           headers: {
                             Authorization: `Bearer ${token}`,
                             "Content-Type": "application/json",
                           },
-                          body: JSON.stringify({
-                            ip_address: entry.from,
-                            defense_type: "TAR_PIT",
-                          }),
+                          body: JSON.stringify({ e2ee_payload: encryptedPayload }),
                         });
                         // Optimistic UI update
                         const btn = document.getElementById(
@@ -303,16 +307,19 @@ export default function ThreatFeed() {
                     onClick={async () => {
                       if (!token) return;
                       try {
+                        const rawPayload = JSON.stringify({
+                            ip_address: entry.from,
+                            defense_type: "POISONED_ABI",
+                        });
+                        const encryptedPayload = await encryptE2EERequest(rawPayload);
+                        
                         await fetch("/api/dashboard/defend", {
                           method: "POST",
                           headers: {
                             Authorization: `Bearer ${token}`,
                             "Content-Type": "application/json",
                           },
-                          body: JSON.stringify({
-                            ip_address: entry.from,
-                            defense_type: "POISONED_ABI",
-                          }),
+                          body: JSON.stringify({ e2ee_payload: encryptedPayload }),
                         });
                         const btn = document.getElementById(
                           `poison-btn-${entry.id}`,
