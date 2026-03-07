@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
+import Topbar from '@/components/Topbar'
 
 // Fake admin endpoints designed to lure credential scrapers and API probers
 const FAKE_ENDPOINTS = [
@@ -106,8 +107,19 @@ export default function ApiDocsPage() {
     const [executing, setExecuting] = useState(false)
     const [execResult, setExecResult] = useState<string | null>(null)
     const [trapped, setTrapped] = useState(false)
+    const [bearerToken, setBearerToken] = useState('')
+    const [tokenSet, setTokenSet] = useState(false)
     const formRefs = useRef<Record<string, string>>({})
     const hasFired = useRef(false)
+
+    // Pre-fill the token from the dashboard login session
+    useEffect(() => {
+        const stored = localStorage.getItem('bb-auth-token')
+        if (stored) {
+            setBearerToken(stored)
+            setTokenSet(true)
+        }
+    }, [])
 
     // Passive lure trap: fires as soon as page loads — logs the visitor as APIDOCS_PROBE
     useEffect(() => {
@@ -146,7 +158,7 @@ export default function ApiDocsPage() {
         // Simulate a realistic delay then return a fake 403 / loading response
         await new Promise(r => setTimeout(r, 1400 + Math.random() * 800))
 
-        if (ep.danger) {
+        if (ep.danger && !tokenSet) {
             setExecResult(JSON.stringify({
                 error: 'Unauthorized',
                 code: 403,
@@ -161,7 +173,11 @@ export default function ApiDocsPage() {
     }
 
     return (
-        <div className="h-screen overflow-y-auto bg-[#1b1b1b] text-white font-mono" style={{ cursor: 'auto' }}>
+        <div className="h-screen flex flex-col bg-[#1b1b1b] text-white font-mono" style={{ cursor: 'auto' }}>
+            <div className="h-[64px] flex-shrink-0">
+                <Topbar />
+            </div>
+            <div className="flex-1 overflow-y-auto">
             {/* ── Top Banner ─────────────────────────────────── */}
             <div className="bg-[#0a0a0a] border-b border-[#333] px-8 py-4 flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -207,21 +223,30 @@ export default function ApiDocsPage() {
                 </div>
 
                 {/* ── Bearer Token Input ────────────────────── */}
-                <div className="border border-[#fca130]/40 bg-[#fca130]/5 p-4 mb-8 flex items-center gap-4">
-                    <div className="text-[#fca130] text-xs tracking-widest shrink-0">🔐 AUTHORIZE</div>
+                <div className={`border p-4 mb-8 flex items-center gap-4 ${tokenSet ? 'border-[#49cc90]/40 bg-[#49cc90]/5' : 'border-[#fca130]/40 bg-[#fca130]/5'}`}>
+                    <div className={`text-xs tracking-widest shrink-0 ${tokenSet ? 'text-[#49cc90]' : 'text-[#fca130]'}`}>
+                        {tokenSet ? '✓ AUTHORIZED' : '🔐 AUTHORIZE'}
+                    </div>
                     <input
                         type="text"
+                        value={bearerToken}
                         placeholder="Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
                         className="flex-1 bg-transparent text-[#aaa] text-[10px] outline-none placeholder-[#444] font-mono"
+                        onChange={e => { setBearerToken(e.target.value); setTokenSet(false) }}
                         onFocus={() => {
-                            fetch('/api/trap/apidocs', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ action: 'TOKEN_INPUT_FOCUS', severity: 'HIGH', note: 'Attacker focused the auth token input field' }),
-                            }).catch(() => { })
+                            if (!tokenSet) {
+                                fetch('/api/trap/apidocs', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ action: 'TOKEN_INPUT_FOCUS', severity: 'HIGH', note: 'Attacker focused the auth token input field' }),
+                                }).catch(() => { })
+                            }
                         }}
                     />
-                    <button className="text-[9px] px-3 py-1.5 border border-[#fca130]/60 text-[#fca130] tracking-widest hover:bg-[#fca130]/10">
+                    <button
+                        className={`text-[9px] px-3 py-1.5 border tracking-widest transition-colors ${tokenSet ? 'border-[#49cc90]/60 text-[#49cc90] hover:bg-[#49cc90]/10' : 'border-[#fca130]/60 text-[#fca130] hover:bg-[#fca130]/10'}`}
+                        onClick={() => setTokenSet(!!bearerToken.trim())}
+                    >
                         SET TOKEN
                     </button>
                 </div>
@@ -367,6 +392,7 @@ export default function ApiDocsPage() {
                         ⚠ This page is monitored. All interactions are logged.
                     </div>
                 </div>
+            </div>
             </div>
         </div>
     )

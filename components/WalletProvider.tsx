@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useCallback, useContext, useState, useEffect, useRef } from 'react'
+import React, { createContext, useCallback, useContext, useState, useEffect } from 'react'
 import { ethers } from 'ethers'
 import { DEFAULT_CHAIN_ID, SUPPORTED_CHAINS, type SupportedChainId } from '@/lib/web3/chains'
 
@@ -46,6 +46,10 @@ export function useWallet() {
 
 const PREFERRED_CHAIN_STORAGE_KEY = 'bb-preferred-chain'
 
+// Module-level mutex — survives React Fast Refresh remounts so we never fire
+// a duplicate wallet_addEthereumChain while a MetaMask popup is already open.
+let chainSwitchInFlight = false
+
 export function WalletProvider({ children }: { children: React.ReactNode }) {
     const [address, setAddress] = useState<string | null>(null)
     const [balance, setBalance] = useState<string | null>(null)
@@ -53,9 +57,6 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     const [preferredChainId, setPreferredChainIdState] = useState<SupportedChainId>(DEFAULT_CHAIN_ID)
     const [missingMetaMask, setMissingMetaMask] = useState(false)
     const [isActive, setIsActive] = useState(false)
-    // Prevents concurrent wallet_addEthereumChain / wallet_switchEthereumChain calls
-    // that cause MetaMask -32002 "already pending" errors.
-    const chainSwitchInFlight = useRef(false)
 
     const dismissModal = () => setMissingMetaMask(false)
 
@@ -90,8 +91,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Guard against concurrent switch attempts (causes MetaMask -32002)
-        if (chainSwitchInFlight.current) return false
-        chainSwitchInFlight.current = true
+        if (chainSwitchInFlight) return false
+        chainSwitchInFlight = true
 
         const chain = SUPPORTED_CHAINS[targetChainId]
 
@@ -145,7 +146,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
             console.error('Chain switch rejected by wallet or user.', switchError)
             return false
         } finally {
-            chainSwitchInFlight.current = false
+            chainSwitchInFlight = false
         }
     }, [])
 
@@ -210,8 +211,16 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
-        const handleChainChanged = () => {
-            window.location.reload()
+        const handleChainChanged = (...args: unknown[]) => {
+            // Update chainId in-place so the vault/ledger pages don't lose wallet connection.
+            // MetaMask recommends a reload but in-place update is better UX here.
+            const newChainIdRaw = args[0] as string
+            const newChainId = parseInt(newChainIdRaw, 16)
+            if (!isNaN(newChainId)) {
+                setChainId(newChainId)
+            }
+            // Re-fetch balance for the new chain
+            connectWallet()
         }
 
         eth.on('accountsChanged', handleAccountsChanged)

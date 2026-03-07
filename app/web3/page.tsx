@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { CHAIN_LABEL, getContractsForChain, isContractsConfigured, type SupportedChain } from '@/lib/contracts'
 import { SUPPORTED_CHAINS } from '@/lib/web3/chains'
 import CustomCursor from '@/components/CustomCursor'
+import Topbar from '@/components/Topbar'
 
 const CHAINS: SupportedChain[] = [11155111, 11142220]
 
@@ -12,8 +13,12 @@ function shortAddress(value: string) {
 
 export default function Web3HubPage() {
   return (
-    <main className="min-h-screen bg-[#05070b] px-6 py-10 text-[#eaf4ff]">
+    <main className="min-h-screen bg-[#05070b] text-[#eaf4ff] flex flex-col">
       <CustomCursor />
+      <div className="h-[64px] flex-shrink-0">
+        <Topbar />
+      </div>
+      <div className="flex-1 px-6 py-10">
       <section className="mx-auto max-w-6xl">
         <div className="rounded-md border border-[#203046] bg-[linear-gradient(135deg,#091423_0%,#081b16_50%,#0d1829_100%)] p-8 shadow-[0_20px_80px_rgba(0,0,0,0.45)]">
           <p className="text-[11px] tracking-[0.32em] uppercase text-[#7bbcf3]">Web3 Operations Hub</p>
@@ -78,6 +83,7 @@ export default function Web3HubPage() {
           })}
         </div>
       </section>
+      </div>
     </main>
   )
 }

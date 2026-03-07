@@ -51,8 +51,20 @@ function asSupportedChain(chainId: number | null): SupportedChainId | null {
 
 function extractErrorMessage(error: unknown): string {
     if (typeof error === 'object' && error !== null) {
-        const e = error as { shortMessage?: string; reason?: string; message?: string }
-        return e.shortMessage || e.reason || e.message || 'Transaction failed'
+        const e = error as {
+            shortMessage?: string
+            reason?: string
+            message?: string
+            errorName?: string
+            code?: string | number
+        }
+        // OpenZeppelin v5 custom errors
+        if (e.errorName === 'EnforcedPause') return 'Contract is currently paused by admin'
+        if (e.errorName === 'ReentrancyGuardReentrantCall') return 'Re-entrant call blocked'
+        // User rejected the MetaMask popup
+        if (e.code === 4001 || e.code === 'ACTION_REJECTED') return 'Transaction rejected in wallet'
+        // Prefer the decoded revert reason string from the contract
+        return e.reason || e.shortMessage || e.message || 'Transaction failed'
     }
     return 'Transaction failed'
 }
@@ -151,6 +163,13 @@ export default function VaultPage() {
             return
         }
 
+        // Don't make eth_call requests if MetaMask is on a different chain —
+        // the contract addresses are for activeChain and calls will revert on
+        // the wrong network, spamming the console with "execution reverted".
+        if (chainId !== null && chainId !== activeChain) {
+            setPrices(ZERO_PRICE)
+            return
+        }
         try {
             const provider = getBrowserProvider()
             if (!provider) return
@@ -182,7 +201,7 @@ export default function VaultPage() {
             // Keep UI usable even when plan/report IDs are not configured on-chain yet.
             setPrices(ZERO_PRICE)
         }
-    }, [activeChain, hasContractConfig, isActive, planKey, reportKey])
+    }, [activeChain, chainId, hasContractConfig, isActive, planKey, reportKey])
 
     useEffect(() => {
         loadLivePricing()
@@ -360,7 +379,7 @@ export default function VaultPage() {
                     <Topbar />
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-12 custom-scrollbar flex items-center justify-center">
+                <div className="flex-1 overflow-y-auto p-12 custom-scrollbar flex flex-col items-center">
 
                     {/* In-page notification toast */}
                     {notification && (
