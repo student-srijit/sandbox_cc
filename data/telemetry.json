@@ -5471,5 +5471,70 @@
     "server_breakdown": "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
     "client_breakdown": "[{\"check\":\"Mouse Entropy\",\"score\":25,\"reason\":\"Mouse trajectory is artificially perfectly linear.\"},{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"}]",
     "id": "BB-TL-1772885321261-ZEY5KEG"
+  },
+  {
+    "timestamp": 1772901340513,
+    "ip_address": "::1",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "session_hash": "82355B6F48756AD4",
+    "server_score": 12,
+    "client_score": 55,
+    "final_score": 67,
+    "tier": "SUSPICIOUS",
+    "server_breakdown": "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
+    "client_breakdown": "[{\"check\":\"Mouse Entropy\",\"score\":35,\"reason\":\"Zero mouse movements detected in viewport.\"},{\"check\":\"Timing\",\"score\":20,\"reason\":\"No interaction and zero mouse movement detected within limit.\"}]",
+    "id": "BB-TL-1772901340515-VP3E70X"
+  },
+  {
+    "timestamp": 1772901471913,
+    "ip_address": "::1",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "session_hash": "82355B6F48756AD4",
+    "server_score": 32,
+    "client_score": 20,
+    "final_score": 52,
+    "tier": "SUSPICIOUS",
+    "server_breakdown": "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"},{\"check\":\"Server Timing\",\"score\":15,\"reason\":\"Requests arriving consistently faster than 500ms apart.\"},{\"check\":\"Server Timing\",\"score\":20,\"reason\":\"Request interval variance is <50ms (machine-regular timing).\"}]",
+    "client_breakdown": "[{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"}]",
+    "id": "BB-TL-1772901471915-PKOD3OH"
+  },
+  {
+    "timestamp": 1772901499191,
+    "ip_address": "::1",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "session_hash": "82355B6F48756AD4",
+    "server_score": 12,
+    "client_score": 20,
+    "final_score": 32,
+    "tier": "HUMAN",
+    "server_breakdown": "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
+    "client_breakdown": "[{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"}]",
+    "id": "BB-TL-1772901499192-4RTB46O"
+  },
+  {
+    "timestamp": 1772901503257,
+    "ip_address": "::1",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "session_hash": "82355B6F48756AD4",
+    "server_score": 12,
+    "client_score": 20,
+    "final_score": 32,
+    "tier": "HUMAN",
+    "server_breakdown": "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
+    "client_breakdown": "[{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"}]",
+    "id": "BB-TL-1772901503258-WLDLKKU"
+  },
+  {
+    "timestamp": 1772901576920,
+    "ip_address": "::1",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    "session_hash": "82355B6F48756AD4",
+    "server_score": 12,
+    "client_score": 35,
+    "final_score": 47,
+    "tier": "SUSPICIOUS",
+    "server_breakdown": "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
+    "client_breakdown": "[{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"},{\"check\":\"Timing\",\"score\":15,\"reason\":\"First UI interaction happened impossibly fast (<50ms).\"}]",
+    "id": "BB-TL-1772901576922-A9LC0XR"
   }
 ]

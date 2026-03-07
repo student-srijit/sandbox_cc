@@ -8,7 +8,7 @@ export const runtime = 'nodejs'
 const dataDir = path.join(process.cwd(), 'data')
 const dbPath = path.join(dataDir, 'protected_nodes.json')
 
-const START_NODES = 14820
+const START_NODES = 0
 
 function initFile() {
     if (!fs.existsSync(dataDir)) {

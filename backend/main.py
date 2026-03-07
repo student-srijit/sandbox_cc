@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from database import init_db
 from router import router
 from world_state import manager
+from network_defense import ActiveDefenseMiddleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bhool-bhulaiyaa")
@@ -77,6 +78,12 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-BB-Threat-Score", "X-BB-Tier", "X-BB-Session"],
 )
+
+# 2b. Network-Layer Active Defense Middleware
+# Runs after CORS (so OPTIONS pre-flights are never rate-limited) but before
+# route handlers — handles per-IP rate limiting, login brute-force lockout,
+# and directory scan detection, automatically feeding the ContainmentOrchestrator.
+app.add_middleware(ActiveDefenseMiddleware)
 
 # 2. Global Request Timing & Cleanup Middleware
 @app.middleware("http")
