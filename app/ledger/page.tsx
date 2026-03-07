@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Contract, ethers } from "ethers";
 import { useWallet } from "@/components/WalletProvider";
 import Topbar from "@/components/Topbar";
 import DynamicTitle from "@/components/DynamicTitle";
@@ -8,14 +9,32 @@ import SvgDefs from "@/components/SvgDefs";
 import AmbientLayer from "@/components/AmbientLayer";
 import HexGridCanvas from "@/components/HexGridCanvas";
 import CustomCursor from "@/components/CustomCursor";
+import {
+  CHAIN_LABEL,
+  getContractsForChain,
+  isContractsConfigured,
+  type SupportedChain,
+} from "@/lib/contracts";
+import { EVIDENCE_ATTESTATION_ABI } from "@/lib/web3/abis";
 
 interface LedgerEntry {
   threat_id: string;
+  evidence_id?: string;
   timestamp: string;
   ip: string;
   tier: string;
   toolchain: string;
+  attack_type?: string;
+  confidence?: number;
+  record_type?: "ATTACK" | "REAL_TRANSACTION";
+  auto_blocked?: boolean;
+  containment_mode?: string | null;
+  containment_reason?: string;
+  status_label?: string;
+  content_hash?: string;
   tx_hash: string;
+  source_kind?: "attack" | "wallet_tx";
+  explorer_url?: string;
 }
 
 interface WalletTx {
@@ -33,17 +52,118 @@ interface WalletTx {
   functionName: string;
 }
 
+function formatLedgerTimestamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return { local: value, utc: "" };
+  }
+
+  const local = date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const utc = date.toISOString().replace("T", " ").slice(0, 19);
+  return { local, utc };
+}
+
+function verifiedStorageKey(chainId: number, address: string | null) {
+  return `bb-ledger-verified:${chainId}:${(address || "anon").toLowerCase()}`;
+}
+
+function readPersistedVerifiedIds(chainId: number, address: string | null): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(verifiedStorageKey(chainId, address));
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistVerifiedIds(chainId: number, address: string | null, ids: Set<string>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      verifiedStorageKey(chainId, address),
+      JSON.stringify(Array.from(ids)),
+    );
+  } catch {
+    // Ignore storage write failures; on-chain status is still source of truth.
+  }
+}
+
 export default function LedgerPage() {
-  const { isActive, connectWallet, address, preferredChainId } = useWallet();
+  const {
+    isActive,
+    connectWallet,
+    switchChain,
+    address,
+    chainId,
+    preferredChainId,
+  } = useWallet();
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState<string | null>(null);
   const [verifiedIds, setVerifiedIds] = useState<Set<string>>(new Set());
+  const [verifyTxByThreat, setVerifyTxByThreat] = useState<Record<string, string>>(
+    {},
+  );
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   const [walletTxs, setWalletTxs] = useState<WalletTx[]>([]);
   const [walletTxLoading, setWalletTxLoading] = useState(false);
+  const [walletTxRefreshTick, setWalletTxRefreshTick] = useState(0);
+  const [sendingRealTx, setSendingRealTx] = useState(false);
+  const [realTxError, setRealTxError] = useState<string | null>(null);
+  const [lastRealTxHash, setLastRealTxHash] = useState<string | null>(null);
+
+  const activeChain = preferredChainId as SupportedChain;
 
   const preferredChainLabel =
     preferredChainId === 11155111 ? "sepolia" : "celo-sepolia";
+
+  const txExplorerBase =
+    preferredChainId === 11142220
+      ? "https://celo-sepolia.blockscout.com/tx/"
+      : "https://sepolia.etherscan.io/tx/";
+
+  const mergedEntries = useMemo<LedgerEntry[]>(() => {
+    const walletRows: LedgerEntry[] = walletTxs.map((tx) => ({
+      threat_id: `USER-TX-${tx.hash.slice(2, 10).toUpperCase()}`,
+      timestamp: new Date(tx.timestamp).toISOString(),
+      ip: tx.from,
+      tier: "HUMAN",
+      toolchain: tx.functionName ? `Wallet/${tx.functionName}` : "Wallet/MetaMask",
+      attack_type: "BENIGN_ONCHAIN_TX",
+      confidence: 1,
+      record_type: "REAL_TRANSACTION",
+      auto_blocked: false,
+      containment_mode: null,
+      containment_reason: "",
+      status_label: "REAL_TRANSACTION",
+      content_hash: tx.hash,
+      tx_hash: tx.hash,
+      evidence_id: `USR-${tx.hash.slice(2, 18).toUpperCase()}`,
+      source_kind: "wallet_tx",
+      explorer_url: tx.explorerUrl,
+    }));
+
+    const attackRows: LedgerEntry[] = entries.map((entry) => ({
+      ...entry,
+      source_kind: entry.source_kind || "attack",
+    }));
+
+    return [...walletRows, ...attackRows].sort((a, b) => {
+      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+    });
+  }, [entries, walletTxs]);
 
   useEffect(() => {
     const fetchLedger = async () => {
@@ -96,21 +216,270 @@ export default function LedgerPage() {
     };
 
     fetchWalletTxs();
-  }, [address, isActive, preferredChainLabel]);
+  }, [address, isActive, preferredChainLabel, walletTxRefreshTick]);
+
+  const handleSendRealUserTx = async () => {
+    setRealTxError(null);
+
+    if (!isActive || !address) {
+      await connectWallet(preferredChainId);
+      return;
+    }
+
+    setSendingRealTx(true);
+    try {
+      if (chainId !== preferredChainId) {
+        const switched = await switchChain(preferredChainId);
+        if (!switched) {
+          throw new Error("Please switch to the selected chain in wallet");
+        }
+      }
+
+      const eth = (window as Window & { ethereum?: ethers.Eip1193Provider })
+        .ethereum;
+      if (!eth) {
+        throw new Error("Wallet provider unavailable");
+      }
+
+      const provider = new ethers.BrowserProvider(eth);
+      const signer = await provider.getSigner();
+
+      // Real on-chain transaction: tiny self-transfer to generate auditable history.
+      const tx = await signer.sendTransaction({
+        to: address,
+        value: ethers.parseEther("0.00001"),
+      });
+
+      setLastRealTxHash(tx.hash);
+      await tx.wait();
+
+      setWalletTxs((prev) => {
+        const exists = prev.some((item) => item.hash.toLowerCase() === tx.hash.toLowerCase());
+        if (exists) return prev;
+        const optimistic: WalletTx = {
+          chain: preferredChainLabel,
+          hash: tx.hash,
+          timestamp: Date.now(),
+          blockNumber: "",
+          from: address,
+          to: address,
+          value: "0.00001",
+          symbol: preferredChainId === 11142220 ? "CELO" : "ETH",
+          status: "success",
+          kind: "native",
+          explorerUrl: `${txExplorerBase}${tx.hash}`,
+          functionName: "self-transfer",
+        };
+        return [optimistic, ...prev];
+      });
+
+      // Trigger explorer-backed refresh to reconcile exact chain metadata.
+      setWalletTxRefreshTick((prev) => prev + 1);
+    } catch (error) {
+      const message =
+        typeof error === "object" && error !== null && "shortMessage" in error
+          ? String((error as { shortMessage?: string }).shortMessage)
+          : error instanceof Error
+            ? error.message
+            : "Failed to send real transaction";
+      setRealTxError(message);
+    } finally {
+      setSendingRealTx(false);
+    }
+  };
+
+  useEffect(() => {
+    // Warm the UI with last known verified rows until on-chain refresh completes.
+    const localIds = readPersistedVerifiedIds(preferredChainId, address);
+    if (localIds.size > 0) {
+      setVerifiedIds(localIds);
+    }
+  }, [address, preferredChainId]);
+
+  useEffect(() => {
+    const fetchOnChainVerification = async () => {
+      if (!isActive || !address || entries.length === 0) {
+        const localIds = readPersistedVerifiedIds(preferredChainId, address);
+        setVerifiedIds(localIds);
+        return;
+      }
+
+      try {
+        const threatIds = entries
+          .filter((entry) => (entry.record_type || "ATTACK") === "ATTACK")
+          .map((entry) => entry.threat_id);
+        const res = await fetch("/api/ledger/attestation-status", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            chainId: preferredChainId,
+            submitter: address,
+            threatIds,
+          }),
+        });
+
+        if (!res.ok) {
+          return;
+        }
+
+        const data = (await res.json()) as { verifiedThreatIds?: string[] };
+        const onChainIds = new Set(data.verifiedThreatIds || []);
+        const merged = new Set<string>();
+        readPersistedVerifiedIds(preferredChainId, address).forEach((id) => merged.add(id));
+        onChainIds.forEach((id) => merged.add(id));
+        setVerifiedIds(merged);
+        persistVerifiedIds(preferredChainId, address, merged);
+      } catch {
+        // Keep UI usable even if RPC or backend status fetch fails.
+      }
+    };
+
+    fetchOnChainVerification();
+  }, [address, entries, isActive, preferredChainId]);
 
   const handleVerify = async (entry: LedgerEntry) => {
-    if (!isActive) {
-      connectWallet();
+    setVerifyError(null);
+
+    if (!isActive || !address) {
+      await connectWallet(preferredChainId);
+      return;
+    }
+
+    const contracts = getContractsForChain(activeChain);
+    if (!isContractsConfigured(contracts)) {
+      setVerifyError(
+        `Contracts are missing for ${CHAIN_LABEL[activeChain]}. Run web3 deploy + sync env first.`,
+      );
+      return;
+    }
+
+    const contentHash = entry.content_hash || entry.tx_hash;
+    if (!/^0x[a-fA-F0-9]{64}$/.test(contentHash)) {
+      setVerifyError("Integrity hash is invalid for on-chain attestation");
       return;
     }
 
     setVerifying(entry.threat_id);
+    try {
+      if (chainId !== preferredChainId) {
+        const switched = await switchChain(preferredChainId);
+        if (!switched) {
+          throw new Error("Please switch to the selected chain in wallet");
+        }
+      }
 
-    // Simulate a cryptographic contract call delay
-    await new Promise((r) => setTimeout(r, 1500));
+      const challengeRes = await fetch("/api/ledger/attest", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          chainId: preferredChainId,
+          threatId: entry.threat_id,
+          contentHash,
+          submitter: address,
+        }),
+      });
 
-    setVerifiedIds((prev) => new Set(prev).add(entry.threat_id));
-    setVerifying(null);
+      const challengeData = (await challengeRes.json()) as {
+        signingMode?: "server-reviewer" | "client-reviewer";
+        domain?: {
+          name: string;
+          version: string;
+          chainId: number;
+          verifyingContract: string;
+        };
+        types?: {
+          EvidenceRequest: Array<{ name: string; type: string }>;
+        };
+        value?: {
+          submitter: string;
+          threatIdHash: string;
+          cidHash: string;
+          contentHash: string;
+          nonce: string;
+          deadline: number;
+        };
+        cid?: string;
+        deadline?: number;
+        reviewerSignature?: string;
+        error?: string;
+      };
+
+      if (
+        !challengeRes.ok ||
+        (challengeData.signingMode !== "client-reviewer" &&
+          !challengeData.reviewerSignature)
+      ) {
+        throw new Error(challengeData.error || "Failed to prepare attestation");
+      }
+
+      const eth = (window as Window & { ethereum?: ethers.Eip1193Provider })
+        .ethereum;
+      if (!eth) {
+        throw new Error("Wallet provider unavailable");
+      }
+
+      const provider = new ethers.BrowserProvider(eth);
+      const signer = await provider.getSigner();
+
+      let reviewerSignature = challengeData.reviewerSignature || "";
+      if (challengeData.signingMode === "client-reviewer") {
+        if (!challengeData.domain || !challengeData.types || !challengeData.value) {
+          throw new Error("Invalid attestation challenge payload");
+        }
+        reviewerSignature = await signer.signTypedData(
+          challengeData.domain,
+          challengeData.types,
+          {
+            ...challengeData.value,
+            nonce: BigInt(challengeData.value.nonce),
+          },
+        );
+      }
+
+      if (!reviewerSignature) {
+        throw new Error("Reviewer signature was not generated");
+      }
+
+      const contract = new Contract(
+        contracts.evidenceAttestation,
+        EVIDENCE_ATTESTATION_ABI,
+        signer,
+      );
+
+      const tx = await contract.attestEvidence(
+        entry.threat_id,
+        challengeData.cid,
+        contentHash,
+        BigInt(challengeData.deadline || 0),
+        reviewerSignature,
+      );
+
+      await tx.wait();
+
+      setVerifyTxByThreat((prev) => ({
+        ...prev,
+        [entry.threat_id]: tx.hash,
+      }));
+      setVerifiedIds((prev) => {
+        const next = new Set(prev).add(entry.threat_id);
+        persistVerifiedIds(preferredChainId, address, next);
+        return next;
+      });
+    } catch (error) {
+      const message =
+        typeof error === "object" && error !== null && "shortMessage" in error
+          ? String((error as { shortMessage?: string }).shortMessage)
+          : error instanceof Error
+            ? error.message
+            : "On-chain verification failed";
+      setVerifyError(message);
+    } finally {
+      setVerifying(null);
+    }
   };
 
   return (
@@ -164,14 +533,51 @@ export default function LedgerPage() {
               </div>
             ) : (
               <div className="space-y-6">
+                {verifyError && (
+                  <div className="border border-[#5f1d2c] bg-[#2b0f16] px-4 py-3 text-xs tracking-wide text-[#ff9fb1]">
+                    {verifyError}
+                  </div>
+                )}
+
+                {realTxError && (
+                  <div className="border border-[#5f1d2c] bg-[#2b0f16] px-4 py-3 text-xs tracking-wide text-[#ff9fb1]">
+                    {realTxError}
+                  </div>
+                )}
+
+                {lastRealTxHash && (
+                  <div className="border border-[#1b5f4a] bg-[#0f2b22] px-4 py-3 text-xs tracking-wide text-[#9fffd6]">
+                    Real user transaction sent: {lastRealTxHash.slice(0, 14)}...{lastRealTxHash.slice(-10)}
+                    <a
+                      href={`${txExplorerBase}${lastRealTxHash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-2 underline text-[#8fdfff]"
+                    >
+                      explorer
+                    </a>
+                  </div>
+                )}
+
                 <div className="bg-[#0b0c10]/80 backdrop-blur-md border border-[#222] p-5">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-sm tracking-[0.2em] text-white uppercase">
                       Your Blockchain Transactions
                     </h2>
-                    <span className="text-[10px] uppercase tracking-[0.18em] text-[#8a8f99]">
-                      Chain: {preferredChainLabel}
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] uppercase tracking-[0.18em] text-[#8a8f99]">
+                        Chain: {preferredChainLabel}
+                      </span>
+                      <button
+                        onClick={() => {
+                          void handleSendRealUserTx();
+                        }}
+                        disabled={sendingRealTx}
+                        className="px-3 py-1 border border-[#2a8a5b] bg-[#0f2b1d] text-[#9fffd6] hover:bg-[#143526] disabled:opacity-50 disabled:cursor-not-allowed text-[10px] tracking-widest uppercase"
+                      >
+                        {sendingRealTx ? "Sending..." : "Send Real Test Tx"}
+                      </button>
+                    </div>
                   </div>
 
                   {!isActive ? (
@@ -279,9 +685,12 @@ export default function LedgerPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#111]">
-                      {entries.map((entry) => {
+                                      {mergedEntries.map((entry) => {
                         const isVerified = verifiedIds.has(entry.threat_id);
                         const isVerifying = verifying === entry.threat_id;
+                                        const isWalletTxRow = entry.source_kind === "wallet_tx";
+                        const isAttack = (entry.record_type || "ATTACK") === "ATTACK";
+                        const isAutoBlocked = Boolean(entry.auto_blocked);
 
                         return (
                           <tr
@@ -289,20 +698,53 @@ export default function LedgerPage() {
                             className="hover:bg-white/5 transition-colors"
                           >
                             <td className="px-6 py-4 whitespace-nowrap text-[#aaa]">
-                              {entry.timestamp.split(".")[0].replace("T", " ")}
+                              {(() => {
+                                const ts = formatLedgerTimestamp(entry.timestamp);
+                                return (
+                                  <div className="leading-tight">
+                                    <div>{ts.local}</div>
+                                    {ts.utc && (
+                                      <div className="text-[10px] text-[#6f7684]">{ts.utc} UTC</div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span className="text-[#00FF41]">
                                 {entry.threat_id}
                               </span>
+                              <div className="mt-1">
+                                <span
+                                  className={`inline-block px-2 py-0.5 text-[10px] tracking-widest border rounded-[2px] ${
+                                    isAttack
+                                      ? "text-[#ff9b9b] border-[#5f1d2c] bg-[#2b0f16]"
+                                      : "text-[#9fffd6] border-[#1b5f4a] bg-[#0f2b22]"
+                                  }`}
+                                >
+                                  {isAttack ? "ATTACK" : "REAL TX"}
+                                </span>
+                              </div>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-[#ccc]">
-                              {entry.ip}
+                              {isWalletTxRow
+                                ? `${entry.ip.slice(0, 8)}...${entry.ip.slice(-6)}`
+                                : entry.ip}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
-                              <span className="px-2 py-1 bg-[#222] text-[#e0e0e0] border border-[#444] rounded-[2px]">
-                                {entry.toolchain}
-                              </span>
+                              <div className="flex flex-col gap-1">
+                                <span className="px-2 py-1 bg-[#222] text-[#e0e0e0] border border-[#444] rounded-[2px]">
+                                  {entry.toolchain}
+                                </span>
+                                {entry.attack_type && (
+                                  <span className="text-[10px] text-[#9ea7b5] tracking-wide">
+                                    {entry.attack_type}
+                                    {typeof entry.confidence === "number"
+                                      ? ` (${Math.round(entry.confidence * 100)}%)`
+                                      : ""}
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="px-6 py-4 text-[#aaa] font-mono tracking-tight text-[10px]">
                               {entry.tx_hash.substring(0, 16)}...
@@ -311,37 +753,79 @@ export default function LedgerPage() {
                               )}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
-                              {isVerified ? (
-                                <div className="flex items-center gap-2 text-[#00FFD1]">
-                                  <svg
-                                    width="12"
-                                    height="12"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
+                              <div className="flex flex-col gap-2">
+                                {isAutoBlocked && (
+                                  <div className="text-[#ff6b7a] tracking-widest text-[10px] uppercase">
+                                    AUTO BLOCKED{entry.containment_mode ? ` · ${entry.containment_mode}` : ""}
+                                  </div>
+                                )}
+
+                                {isWalletTxRow ? (
+                                  <div className="flex items-center gap-2 text-[#9fffd6] uppercase tracking-widest text-[10px]">
+                                    REAL USER TX
+                                    {entry.explorer_url && (
+                                      <a
+                                        href={entry.explorer_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-[10px] underline text-[#8fdfff]"
+                                      >
+                                        explorer
+                                      </a>
+                                    )}
+                                  </div>
+                                ) : isVerified ? (
+                                  <div className="flex items-center gap-2 text-[#00FFD1]">
+                                    <svg
+                                      width="12"
+                                      height="12"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                    >
+                                      <path d="M20 6L9 17l-5-5" />
+                                    </svg>
+                                    VERIFIED
+                                    {verifyTxByThreat[entry.threat_id] && (
+                                      <a
+                                        href={`${
+                                          preferredChainId === 11142220
+                                            ? "https://celo-sepolia.blockscout.com/tx/"
+                                            : "https://sepolia.etherscan.io/tx/"
+                                        }${verifyTxByThreat[entry.threat_id]}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-[10px] underline text-[#8fdfff]"
+                                      >
+                                        tx
+                                      </a>
+                                    )}
+                                  </div>
+                                ) : isVerifying ? (
+                                  <div className="flex items-center gap-2 text-[#FFD700] animate-pulse">
+                                    [ SIGNING TX... ]
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => handleVerify(entry)}
+                                    className="text-[#aaa] hover:text-[#00FFD1] transition-colors tracking-widest uppercase text-[10px]"
                                   >
-                                    <path d="M20 6L9 17l-5-5" />
-                                  </svg>
-                                  VERIFIED
-                                </div>
-                              ) : isVerifying ? (
-                                <div className="flex items-center gap-2 text-[#FFD700] animate-pulse">
-                                  [ SIGNING TX... ]
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => handleVerify(entry)}
-                                  className="text-[#aaa] hover:text-[#00FFD1] transition-colors tracking-widest uppercase text-[10px]"
-                                >
-                                  VERIFY HASH
-                                </button>
-                              )}
+                                    VERIFY HASH
+                                  </button>
+                                )}
+
+                                {entry.containment_reason && (
+                                  <div className="text-[10px] text-[#7d8596] max-w-[280px] whitespace-normal">
+                                    {entry.containment_reason}
+                                  </div>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
                       })}
-                      {entries.length === 0 && (
+                      {mergedEntries.length === 0 && (
                         <tr>
                           <td
                             colSpan={6}

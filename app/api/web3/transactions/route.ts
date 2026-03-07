@@ -34,17 +34,62 @@ type ExplorerResponse = {
   result: ExplorerTx[] | string;
 };
 
+type BlockscoutAddressRef = {
+  hash?: string;
+};
+
+type BlockscoutTx = {
+  hash?: string;
+  timestamp?: string;
+  block_number?: number | string;
+  from?: BlockscoutAddressRef;
+  to?: BlockscoutAddressRef | null;
+  value?: string;
+  status?: string;
+  method?: string | null;
+};
+
+type BlockscoutTokenTransfer = {
+  transaction_hash?: string;
+  timestamp?: string;
+  block_number?: number | string;
+  from?: BlockscoutAddressRef;
+  to?: BlockscoutAddressRef | null;
+  token?: {
+    symbol?: string;
+    decimals?: string;
+  };
+  total?: {
+    value?: string;
+    decimals?: string;
+  };
+  type?: string;
+};
+
+type BlockscoutListResponse<T> = {
+  items?: T[];
+};
+
+const EXPLORER_V2_BASE = "https://api.etherscan.io/v2/api";
+
 const EXPLORER_CONFIG: Record<
   SupportedChain,
-  { apiBase: string; apiKeyEnv: string; explorerBase: string }
+  {
+    chainId: number;
+    legacyApiBase: string;
+    apiKeyEnv: string;
+    explorerBase: string;
+  }
 > = {
   sepolia: {
-    apiBase: "https://api-sepolia.etherscan.io/api",
+    chainId: 11155111,
+    legacyApiBase: "https://api-sepolia.etherscan.io/api",
     apiKeyEnv: "ETHERSCAN_API_KEY",
     explorerBase: "https://sepolia.etherscan.io",
   },
   "celo-sepolia": {
-    apiBase: "https://api-sepolia.celoscan.io/api",
+    chainId: 11142220,
+    legacyApiBase: "https://api-sepolia.celoscan.io/api",
     apiKeyEnv: "CELOSCAN_API_KEY",
     explorerBase: "https://celo-sepolia.blockscout.com",
   },
@@ -60,11 +105,113 @@ async function fetchExplorerTxs(
   action: "txlist" | "tokentx",
   pageSize: number,
 ) {
+  if (chain === "celo-sepolia") {
+    try {
+      if (action === "txlist") {
+        const txRes = await fetch(
+          `${EXPLORER_CONFIG[chain].explorerBase}/api/v2/addresses/${address}/transactions`,
+          {
+            method: "GET",
+            cache: "no-store",
+          },
+        );
+
+        if (!txRes.ok) {
+          return [];
+        }
+
+        const data = (await txRes.json()) as BlockscoutListResponse<BlockscoutTx>;
+        const items = Array.isArray(data.items) ? data.items : [];
+
+        return items.slice(0, pageSize).map((item) => {
+          const unixSeconds = item.timestamp
+            ? Math.floor(new Date(item.timestamp).getTime() / 1000)
+            : 0;
+
+          return {
+            blockNumber: String(item.block_number ?? "0"),
+            timeStamp: String(unixSeconds),
+            hash: item.hash || "",
+            nonce: "0",
+            blockHash: "",
+            transactionIndex: "0",
+            from: item.from?.hash || "",
+            to: item.to?.hash || "",
+            value: item.value || "0",
+            gas: "0",
+            gasPrice: "0",
+            isError: item.status === "ok" ? "0" : "1",
+            txreceipt_status: item.status === "ok" ? "1" : "0",
+            input: "0x",
+            contractAddress: "",
+            cumulativeGasUsed: "0",
+            gasUsed: "0",
+            confirmations: "0",
+            functionName: item.method || "",
+          } satisfies ExplorerTx;
+        });
+      }
+
+      const tokenRes = await fetch(
+        `${EXPLORER_CONFIG[chain].explorerBase}/api/v2/addresses/${address}/token-transfers?type=ERC-20`,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      );
+
+      if (!tokenRes.ok) {
+        return [];
+      }
+
+      const data =
+        (await tokenRes.json()) as BlockscoutListResponse<BlockscoutTokenTransfer>;
+      const items = Array.isArray(data.items) ? data.items : [];
+
+      return items.slice(0, pageSize).map((item) => {
+        const unixSeconds = item.timestamp
+          ? Math.floor(new Date(item.timestamp).getTime() / 1000)
+          : 0;
+        const decimals = item.total?.decimals || item.token?.decimals || "18";
+
+        return {
+          blockNumber: String(item.block_number ?? "0"),
+          timeStamp: String(unixSeconds),
+          hash: item.transaction_hash || "",
+          nonce: "0",
+          blockHash: "",
+          transactionIndex: "0",
+          from: item.from?.hash || "",
+          to: item.to?.hash || "",
+          value: item.total?.value || "0",
+          gas: "0",
+          gasPrice: "0",
+          isError: "0",
+          txreceipt_status: "1",
+          input: "0x",
+          contractAddress: "",
+          cumulativeGasUsed: "0",
+          gasUsed: "0",
+          confirmations: "0",
+          tokenDecimal: decimals,
+          tokenSymbol: item.token?.symbol || "TOKEN",
+          tokenName: item.token?.symbol || "Token",
+          functionName: item.type || "token_transfer",
+        } satisfies ExplorerTx;
+      });
+    } catch {
+      return [];
+    }
+  }
+
   try {
     const config = EXPLORER_CONFIG[chain];
-    const apiKey = process.env[config.apiKeyEnv] || "";
+    // Prefer chain-specific key, fall back to a generic Etherscan key.
+    const apiKey =
+      process.env[config.apiKeyEnv] || process.env.ETHERSCAN_API_KEY || "";
 
     const params = new URLSearchParams({
+      chainid: String(config.chainId),
       module: "account",
       action,
       address,
@@ -79,21 +226,48 @@ async function fetchExplorerTxs(
       params.set("apikey", apiKey);
     }
 
-    const res = await fetch(`${config.apiBase}?${params.toString()}`, {
+    const res = await fetch(`${EXPLORER_V2_BASE}?${params.toString()}`, {
       method: "GET",
       cache: "no-store",
     });
 
-    if (!res.ok) {
+    if (res.ok) {
+      const data = (await res.json()) as ExplorerResponse;
+      if (Array.isArray(data.result)) {
+        return data.result;
+      }
+    }
+
+    // Backward-compatible fallback for explorer providers that still support V1.
+    const legacyParams = new URLSearchParams({
+      module: "account",
+      action,
+      address,
+      startblock: "0",
+      endblock: "99999999",
+      page: "1",
+      offset: String(pageSize),
+      sort: "desc",
+    });
+
+    if (apiKey) {
+      legacyParams.set("apikey", apiKey);
+    }
+
+    const legacyRes = await fetch(
+      `${config.legacyApiBase}?${legacyParams.toString()}`,
+      {
+        method: "GET",
+        cache: "no-store",
+      },
+    );
+
+    if (!legacyRes.ok) {
       return [];
     }
 
-    const data = (await res.json()) as ExplorerResponse;
-    if (!Array.isArray(data.result)) {
-      return [];
-    }
-
-    return data.result;
+    const legacyData = (await legacyRes.json()) as ExplorerResponse;
+    return Array.isArray(legacyData.result) ? legacyData.result : [];
   } catch {
     // Do not fail the API if explorer upstream is temporarily unavailable.
     return [];

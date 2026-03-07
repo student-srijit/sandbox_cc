@@ -17,6 +17,73 @@ class HoneypotEngine:
     on the attacker's Threat Tier.
     """
     
+    def _maybe_auto_contain(
+        self,
+        session_id: str,
+        ip: str,
+        tier: str,
+        threat_score: int,
+        attack_type: str,
+    ) -> None:
+        """Automatically deploy containment against high-risk attacker traffic."""
+        if tier != "BOT":
+            return
+
+        from containment import containment, ContainmentMode
+
+        # Do not overwrite an existing manual or automatic containment decision.
+        if containment.get_mode(ip):
+            return
+
+        high_risk_types = {
+            "WALLET_DRAINER",
+            "KEY_EXTRACTION",
+            "EXPLOIT_EXECUTION",
+            "REENTRANCY_PROBE",
+            "SQL_INJECTION",
+            "PATH_TRAVERSAL",
+        }
+        recon_types = {
+            "RPC_ENUMERATION",
+            "CONTRACT_RECON",
+            "BALANCE_RECON",
+            "DATA_SCRAPING",
+            "MEV_BOT_PROBE",
+        }
+
+        record = intel_logger.active_threats.get(session_id)
+        request_count = 0
+        threat_id = None
+        if record:
+            request_count = int(record.timeline.get("total_requests", 0))
+            threat_id = record.threat_id
+
+        if attack_type in high_risk_types:
+            # Strong default: immediately cut dangerous payload streams.
+            mode = (
+                ContainmentMode.QUARANTINE
+                if threat_score >= 90
+                else ContainmentMode.SHADOW_BAN
+            )
+            containment.deploy(
+                ip=ip,
+                mode=mode,
+                threat_id=threat_id,
+                reason=f"AUTO_BLOCK: {attack_type} detected (score={threat_score})",
+            )
+            print(f"[{ip}] AUTO_BLOCK ENGAGED -> {mode.value} ({attack_type})")
+            return
+
+        # Recon bots get tar-pitted after repeated probing.
+        if attack_type in recon_types and request_count >= 6:
+            containment.deploy(
+                ip=ip,
+                mode=ContainmentMode.TAR_PIT,
+                threat_id=threat_id,
+                reason=f"AUTO_BLOCK: persistent {attack_type} reconnaissance",
+            )
+            print(f"[{ip}] AUTO_BLOCK ENGAGED -> TAR_PIT ({attack_type})")
+
     async def handle_request(
         self, 
         session_id: str, 
@@ -46,6 +113,15 @@ class HoneypotEngine:
             except: pass
             
             intel_logger.record_payload(session_id, method, payload, classification.attack_type)
+
+            # Automatic cyber defense playbook for high-risk traffic.
+            self._maybe_auto_contain(
+                session_id=session_id,
+                ip=ip,
+                tier=tier,
+                threat_score=threat_score,
+                attack_type=classification.attack_type,
+            )
 
         # 1.5 ACTIVE DEFENSE INTERCEPT (THE KILL SWITCHES)
         # --------------------------------------------------------------------

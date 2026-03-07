@@ -341,27 +341,68 @@ import hashlib
 async def get_public_ledger():
     """
     Public endpoint for the Immutable Threat Ledger.
-    Returns anonymized threat data and SHA-256 hashes simulating blockchain TXs.
+    Returns anonymized threat data and stable evidence hashes.
     """
     from database import get_recent_threats
+    from containment import containment
     logs = get_recent_threats(limit=100)
     
     ledger_entries = []
     for log in logs:
         timeline = log.get("timeline", {})
         ts = timeline.get("first_seen", "Unknown")
+        threat_id = log.get("threat_id", "UNKNOWN")
+        entry_ip = log.get("network", {}).get("entry_ip", "0.0.0.0")
+        tier = log.get("network", {}).get("tier", "UNKNOWN")
+        attack_type = log.get("classification", {}).get("attack_type", "UNKNOWN")
+        confidence = float(log.get("classification", {}).get("confidence", 0.0) or 0.0)
+        toolchain = log.get("classification", {}).get("inferred_toolchain", "Unknown")
+        payloads = log.get("payloads", [])
+        containment_mode = containment.get_mode(entry_ip)
+        containment_event = containment.active_containments.get(entry_ip, {})
+
+        is_attack = tier in {"BOT", "SUSPICIOUS"} or attack_type not in {"UNKNOWN", "BENIGN"}
+        record_type = "ATTACK" if is_attack else "REAL_TRANSACTION"
+        auto_blocked = bool(containment_mode) and is_attack
+        status_label = (
+            "AUTO_BLOCKED"
+            if auto_blocked
+            else ("ATTACK_DETECTED" if is_attack else "REAL_TRANSACTION")
+        )
+
+        # Build a canonical immutable payload so the content hash remains stable
+        # across API reloads and minor backend shape changes.
+        canonical_payload = {
+            "threat_id": threat_id,
+            "timestamp": ts,
+            "ip": entry_ip,
+            "tier": tier,
+            "toolchain": toolchain,
+            "payload_methods": [p.get("method", "") for p in payloads],
+            "request_count": timeline.get("total_requests", len(payloads)),
+        }
         
-        # Hash the entire raw JSON to simulate an immutable CID/TxHash
-        raw_json = json.dumps(log, sort_keys=True)
-        tx_hash = "0x" + hashlib.sha256(raw_json.encode('utf-8')).hexdigest()
+        raw_json = json.dumps(canonical_payload, sort_keys=True)
+        content_hash = "0x" + hashlib.sha256(raw_json.encode('utf-8')).hexdigest()
+        evidence_id = "EV-" + hashlib.sha256(f"{threat_id}:{content_hash}".encode('utf-8')).hexdigest()[:20].upper()
         
         ledger_entries.append({
-            "threat_id": log.get("threat_id", "UNKNOWN"),
+            "threat_id": threat_id,
             "timestamp": ts,
-            "ip": log.get("network", {}).get("entry_ip", "0.0.0.0"),
-            "tier": log.get("network", {}).get("tier", "UNKNOWN"),
-            "toolchain": log.get("classification", {}).get("inferred_toolchain", "Unknown"),
-            "tx_hash": tx_hash
+            "ip": entry_ip,
+            "tier": tier,
+            "toolchain": toolchain,
+            "attack_type": attack_type,
+            "confidence": round(confidence, 3),
+            "record_type": record_type,
+            "auto_blocked": auto_blocked,
+            "containment_mode": containment_mode,
+            "containment_reason": containment_event.get("reason", ""),
+            "status_label": status_label,
+            "content_hash": content_hash,
+            # Keep backward compatibility for existing frontend field name.
+            "tx_hash": content_hash,
+            "evidence_id": evidence_id,
         })
         
     return {"ledger": ledger_entries}
