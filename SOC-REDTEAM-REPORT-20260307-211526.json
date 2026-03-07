@@ -1,0 +1,223 @@
+﻿{
+    "report_id":  "soc-redteam-1772898326",
+    "generated_at_utc":  "2026-03-07T15:45:26.4114001Z",
+    "environment":  {
+                        "next":  "http://localhost:3000",
+                        "backend":  "http://localhost:8000"
+                    },
+    "attacks":  [
+                    {
+                        "id":  "A1",
+                        "name":  "Unauthorized access to /api/protect",
+                        "expected":  "401",
+                        "observed":  "401",
+                        "blocked":  true
+                    },
+                    {
+                        "id":  "A2",
+                        "name":  "Unsigned direct forged RPC to backend",
+                        "expected":  "401",
+                        "observed":  "401",
+                        "blocked":  true
+                    },
+                    {
+                        "id":  "A3",
+                        "name":  "Malicious RPC via signed Next proxy",
+                        "expected":  "trapped/deceived",
+                        "observed":  "SHADOW_BAN style poisoned result",
+                        "blocked":  true
+                    },
+                    {
+                        "id":  "A4",
+                        "name":  "Path traversal probe /.env",
+                        "expected":  "fake env bait",
+                        "observed":  "deception payload returned",
+                        "blocked":  true
+                    },
+                    {
+                        "id":  "A5",
+                        "name":  "Oversized RPC payload",
+                        "expected":  "413",
+                        "observed":  "413",
+                        "blocked":  true
+                    }
+                ],
+    "observability":  {
+                          "ledger_top":  [
+                                             {
+                                                 "threat_id":  "TR-2026-BB-D8F9DDE7",
+                                                 "timestamp":  "2026-03-07T15:45:00.257805Z",
+                                                 "ip":  "127.0.0.1",
+                                                 "tier":  "BOT",
+                                                 "toolchain":  "Unknown/Direct File Request",
+                                                 "attack_type":  "PATH_TRAVERSAL",
+                                                 "confidence":  1.0,
+                                                 "record_type":  "ATTACK",
+                                                 "auto_blocked":  true,
+                                                 "containment_mode":  "SHADOW_BAN",
+                                                 "containment_reason":  "AUTO_BLOCK: KEY_EXTRACTION detected (score=0)",
+                                                 "status_label":  "AUTO_BLOCKED",
+                                                 "content_hash":  "0x405489e07bde56ab0d564a378ad7af5390e5b4bdf7958196ee3ebfcf14f83fbe",
+                                                 "tx_hash":  "0x405489e07bde56ab0d564a378ad7af5390e5b4bdf7958196ee3ebfcf14f83fbe",
+                                                 "evidence_id":  "EV-86836E9A5DEC0B83250B"
+                                             },
+                                             {
+                                                 "threat_id":  "TR-2026-BB-A17A0BE3",
+                                                 "timestamp":  "2026-03-07T15:43:30.724184Z",
+                                                 "ip":  "127.0.0.1",
+                                                 "tier":  "BOT",
+                                                 "toolchain":  "Unknown Tooling",
+                                                 "attack_type":  "KEY_EXTRACTION",
+                                                 "confidence":  0.95,
+                                                 "record_type":  "ATTACK",
+                                                 "auto_blocked":  true,
+                                                 "containment_mode":  "SHADOW_BAN",
+                                                 "containment_reason":  "AUTO_BLOCK: KEY_EXTRACTION detected (score=0)",
+                                                 "status_label":  "AUTO_BLOCKED",
+                                                 "content_hash":  "0xef29f346af80dacaaa576dce66eabc80f71204c69fe644614e60048e9830d4e1",
+                                                 "tx_hash":  "0xef29f346af80dacaaa576dce66eabc80f71204c69fe644614e60048e9830d4e1",
+                                                 "evidence_id":  "EV-5E2AB3EF6CAACC6DE477"
+                                             },
+                                             {
+                                                 "threat_id":  "TR-2026-BB-9E785DA4",
+                                                 "timestamp":  "2026-03-07T15:43:31.146401Z",
+                                                 "ip":  "127.0.0.1",
+                                                 "tier":  "BOT",
+                                                 "toolchain":  "Unknown/Direct File Request",
+                                                 "attack_type":  "PATH_TRAVERSAL",
+                                                 "confidence":  1.0,
+                                                 "record_type":  "ATTACK",
+                                                 "auto_blocked":  true,
+                                                 "containment_mode":  "SHADOW_BAN",
+                                                 "containment_reason":  "AUTO_BLOCK: KEY_EXTRACTION detected (score=0)",
+                                                 "status_label":  "AUTO_BLOCKED",
+                                                 "content_hash":  "0xa7d3e511d6bf8a7b32261c83c27feff04f5dc150265703f40e547ea8564acb8f",
+                                                 "tx_hash":  "0xa7d3e511d6bf8a7b32261c83c27feff04f5dc150265703f40e547ea8564acb8f",
+                                                 "evidence_id":  "EV-0B64A91D3C6E0394AE87"
+                                             },
+                                             {
+                                                 "threat_id":  "TR-2026-BB-F5E3AEF3",
+                                                 "timestamp":  "2026-03-07T15:12:42.970127Z",
+                                                 "ip":  "127.0.0.1",
+                                                 "tier":  "BOT",
+                                                 "toolchain":  "Python/Requests",
+                                                 "attack_type":  "KEY_EXTRACTION",
+                                                 "confidence":  1.0,
+                                                 "record_type":  "ATTACK",
+                                                 "auto_blocked":  true,
+                                                 "containment_mode":  "SHADOW_BAN",
+                                                 "containment_reason":  "AUTO_BLOCK: KEY_EXTRACTION detected (score=0)",
+                                                 "status_label":  "AUTO_BLOCKED",
+                                                 "content_hash":  "0xfb904519347b67e2e32d6a25af0f50406c18f1faf19a455db4f66665ae623dd6",
+                                                 "tx_hash":  "0xfb904519347b67e2e32d6a25af0f50406c18f1faf19a455db4f66665ae623dd6",
+                                                 "evidence_id":  "EV-5F1976E7870932EFF5DC"
+                                             },
+                                             {
+                                                 "threat_id":  "TR-2026-BB-BA690524",
+                                                 "timestamp":  "2026-03-07T15:11:42.888748Z",
+                                                 "ip":  "127.0.0.1",
+                                                 "tier":  "BOT",
+                                                 "toolchain":  "Unknown/Direct File Request",
+                                                 "attack_type":  "PATH_TRAVERSAL",
+                                                 "confidence":  1.0,
+                                                 "record_type":  "ATTACK",
+                                                 "auto_blocked":  true,
+                                                 "containment_mode":  "SHADOW_BAN",
+                                                 "containment_reason":  "AUTO_BLOCK: KEY_EXTRACTION detected (score=0)",
+                                                 "status_label":  "AUTO_BLOCKED",
+                                                 "content_hash":  "0x640cece7678115bb2a9e9e244cfb6dd73e44900b98ac34b341b42e69183ab156",
+                                                 "tx_hash":  "0x640cece7678115bb2a9e9e244cfb6dd73e44900b98ac34b341b42e69183ab156",
+                                                 "evidence_id":  "EV-336B43F4474C047A88EE"
+                                             }
+                                         ],
+                          "telemetry_count":  419,
+                          "threat_feed_status":  "degraded",
+                          "telemetry_tail":  [
+                                                 {
+                                                     "timestamp":  1772890821165,
+                                                     "ip_address":  "::1",
+                                                     "user_agent":  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+                                                     "session_hash":  "2735AF3A55547C9B",
+                                                     "server_score":  12,
+                                                     "client_score":  55,
+                                                     "final_score":  67,
+                                                     "tier":  "SUSPICIOUS",
+                                                     "server_breakdown":  "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
+                                                     "client_breakdown":  "[{\"check\":\"Mouse Entropy\",\"score\":35,\"reason\":\"Zero mouse movements detected in viewport.\"},{\"check\":\"Timing\",\"score\":20,\"reason\":\"No interaction and zero mouse movement detected within limit.\"}]",
+                                                     "id":  "BB-TL-1772890821167-UNAJYYA"
+                                                 },
+                                                 {
+                                                     "timestamp":  1772891714011,
+                                                     "ip_address":  "::1",
+                                                     "user_agent":  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+                                                     "session_hash":  "B27A777BAD374A00",
+                                                     "server_score":  12,
+                                                     "client_score":  20,
+                                                     "final_score":  32,
+                                                     "tier":  "HUMAN",
+                                                     "server_breakdown":  "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
+                                                     "client_breakdown":  "[{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"}]",
+                                                     "id":  "BB-TL-1772891714015-PD36DMV"
+                                                 },
+                                                 {
+                                                     "timestamp":  1772891913892,
+                                                     "ip_address":  "::1",
+                                                     "user_agent":  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+                                                     "session_hash":  "B27A777BAD374A00",
+                                                     "server_score":  12,
+                                                     "client_score":  55,
+                                                     "final_score":  67,
+                                                     "tier":  "SUSPICIOUS",
+                                                     "server_breakdown":  "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
+                                                     "client_breakdown":  "[{\"check\":\"Mouse Entropy\",\"score\":35,\"reason\":\"Zero mouse movements detected in viewport.\"},{\"check\":\"Timing\",\"score\":20,\"reason\":\"No interaction and zero mouse movement detected within limit.\"}]",
+                                                     "id":  "BB-TL-1772891913901-6R091BD"
+                                                 },
+                                                 {
+                                                     "timestamp":  1772891966087,
+                                                     "ip_address":  "::1",
+                                                     "user_agent":  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+                                                     "session_hash":  "B27A777BAD374A00",
+                                                     "server_score":  12,
+                                                     "client_score":  35,
+                                                     "final_score":  47,
+                                                     "tier":  "SUSPICIOUS",
+                                                     "server_breakdown":  "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
+                                                     "client_breakdown":  "[{\"check\":\"Mouse Entropy\",\"score\":25,\"reason\":\"Mouse trajectory is artificially perfectly linear.\"},{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"}]",
+                                                     "id":  "BB-TL-1772891966090-OXRV6JP"
+                                                 },
+                                                 {
+                                                     "timestamp":  1772891986210,
+                                                     "ip_address":  "::1",
+                                                     "user_agent":  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+                                                     "session_hash":  "B27A777BAD374A00",
+                                                     "server_score":  12,
+                                                     "client_score":  20,
+                                                     "final_score":  32,
+                                                     "tier":  "HUMAN",
+                                                     "server_breakdown":  "[{\"check\":\"Headers\",\"score\":12,\"reason\":\"Accept header is exactly \\\"*/*\\\" (Typical curl default).\"}]",
+                                                     "client_breakdown":  "[{\"check\":\"Mouse Entropy\",\"score\":20,\"reason\":\"Mouse speed variance is too consistent (machine regular).\"}]",
+                                                     "id":  "BB-TL-1772891986214-ZI6NFWQ"
+                                                 }
+                                             ],
+                          "containment":  {
+                                              "active_count":  1,
+                                              "critical_incident":  false,
+                                              "critical_threat_id":  null,
+                                              "containments":  [
+                                                                   {
+                                                                       "ip":  "127.0.0.1",
+                                                                       "mode":  "SHADOW_BAN",
+                                                                       "threat_id":  "TR-2026-BB-A17A0BE3",
+                                                                       "age_seconds":  115
+                                                                   }
+                                                               ]
+                                          },
+                          "threat_feed_log_count":  0
+                      },
+    "verdict":  {
+                    "pass_rate_percent":  100,
+                    "blocked_or_trapped":  5,
+                    "total":  5,
+                    "note":  "threat feed degraded status indicates backend auth/dependency fallback, but blocking controls are active"
+                }
+}

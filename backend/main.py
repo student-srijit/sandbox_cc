@@ -3,6 +3,7 @@ import random
 import logging
 import asyncio
 import aiohttp
+import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -62,12 +63,19 @@ app = FastAPI(
 
 # 1. CORS Configuration
 # Next.js frontend calls us directly if running locally or via proxied domain
+def _parse_allowed_origins() -> list[str]:
+    configured = os.getenv("CORS_ALLOW_ORIGINS", "")
+    if configured.strip():
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "*"], # Restrict to frontend domains in production
+    allow_origins=_parse_allowed_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type", "X-BB-Threat-Score", "X-BB-Tier", "X-BB-Session"],
 )
 
 # 2. Global Request Timing & Cleanup Middleware

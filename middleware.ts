@@ -13,6 +13,20 @@ const TICKET_COOKIE = 'bb-poly-ticket'
 const SEED_HEADER = 'x-poly-seed'
 const HASH_HEADER = 'x-session-hash'
 const EXPIRY_MINUTES = 15
+const TRUST_PROXY_HEADERS = String(process.env.TRUST_PROXY_HEADERS || 'false').toLowerCase() === 'true'
+
+function getClientIp(request: NextRequest): string {
+    if (request.ip) {
+        return request.ip
+    }
+    if (TRUST_PROXY_HEADERS) {
+        const forwarded = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
+        if (forwarded) {
+            return forwarded.split(',')[0].trim()
+        }
+    }
+    return '127.0.0.1'
+}
 
 export async function middleware(request: NextRequest) {
     // 1. Read existing ticket from cookies
@@ -73,7 +87,7 @@ export async function middleware(request: NextRequest) {
 
     // 1. Extract raw signals
     const userAgent = request.headers.get('user-agent')
-    const ip = request.ip || request.headers.get('x-forwarded-for') || '127.0.0.1'
+    const ip = getClientIp(request)
     const path = request.nextUrl.pathname
     const hasReferrer = !!request.headers.get('referer')
 

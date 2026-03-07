@@ -38,8 +38,39 @@ export async function POST() {
       });
     }
 
+    const loginRes = await fetch(`${FASTAPI_URL}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: process.env.ADMIN_USERNAME || "bhool",
+        password: process.env.ADMIN_PASSWORD || "bhulaiyaa2026",
+      }),
+      signal: AbortSignal.timeout(3000),
+    });
+
+    if (!loginRes.ok) {
+      return NextResponse.json(
+        { error: "Simulation completed but flush auth failed" },
+        { status: 502 },
+      );
+    }
+
+    const loginJson = await loginRes.json();
+    const token = loginJson?.token as string | undefined;
+    if (!token) {
+      return NextResponse.json(
+        { error: "Simulation completed but token was not issued" },
+        { status: 502 },
+      );
+    }
+
     await fetch(`${FASTAPI_URL}/api/flush`, {
       method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
       signal: AbortSignal.timeout(2000),
     });
 

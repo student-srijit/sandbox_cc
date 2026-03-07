@@ -76,19 +76,30 @@ function verifiedStorageKey(chainId: number, address: string | null) {
   return `bb-ledger-verified:${chainId}:${(address || "anon").toLowerCase()}`;
 }
 
-function readPersistedVerifiedIds(chainId: number, address: string | null): Set<string> {
+function readPersistedVerifiedIds(
+  chainId: number,
+  address: string | null,
+): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
-    const raw = window.localStorage.getItem(verifiedStorageKey(chainId, address));
+    const raw = window.localStorage.getItem(
+      verifiedStorageKey(chainId, address),
+    );
     if (!raw) return new Set();
     const parsed = JSON.parse(raw);
-    return new Set(Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : []);
+    return new Set(
+      Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : [],
+    );
   } catch {
     return new Set();
   }
 }
 
-function persistVerifiedIds(chainId: number, address: string | null, ids: Set<string>) {
+function persistVerifiedIds(
+  chainId: number,
+  address: string | null,
+  ids: Set<string>,
+) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(
@@ -113,9 +124,9 @@ export default function LedgerPage() {
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState<string | null>(null);
   const [verifiedIds, setVerifiedIds] = useState<Set<string>>(new Set());
-  const [verifyTxByThreat, setVerifyTxByThreat] = useState<Record<string, string>>(
-    {},
-  );
+  const [verifyTxByThreat, setVerifyTxByThreat] = useState<
+    Record<string, string>
+  >({});
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [walletTxs, setWalletTxs] = useState<WalletTx[]>([]);
   const [walletTxLoading, setWalletTxLoading] = useState(false);
@@ -140,7 +151,9 @@ export default function LedgerPage() {
       timestamp: new Date(tx.timestamp).toISOString(),
       ip: tx.from,
       tier: "HUMAN",
-      toolchain: tx.functionName ? `Wallet/${tx.functionName}` : "Wallet/MetaMask",
+      toolchain: tx.functionName
+        ? `Wallet/${tx.functionName}`
+        : "Wallet/MetaMask",
       attack_type: "BENIGN_ONCHAIN_TX",
       confidence: 1,
       record_type: "REAL_TRANSACTION",
@@ -254,7 +267,9 @@ export default function LedgerPage() {
       await tx.wait();
 
       setWalletTxs((prev) => {
-        const exists = prev.some((item) => item.hash.toLowerCase() === tx.hash.toLowerCase());
+        const exists = prev.some(
+          (item) => item.hash.toLowerCase() === tx.hash.toLowerCase(),
+        );
         if (exists) return prev;
         const optimistic: WalletTx = {
           chain: preferredChainLabel,
@@ -280,8 +295,8 @@ export default function LedgerPage() {
         typeof error === "object" && error !== null && "shortMessage" in error
           ? String((error as { shortMessage?: string }).shortMessage)
           : error instanceof Error
-            ? error.message
-            : "Failed to send real transaction";
+          ? error.message
+          : "Failed to send real transaction";
       setRealTxError(message);
     } finally {
       setSendingRealTx(false);
@@ -327,7 +342,9 @@ export default function LedgerPage() {
         const data = (await res.json()) as { verifiedThreatIds?: string[] };
         const onChainIds = new Set(data.verifiedThreatIds || []);
         const merged = new Set<string>();
-        readPersistedVerifiedIds(preferredChainId, address).forEach((id) => merged.add(id));
+        readPersistedVerifiedIds(preferredChainId, address).forEach((id) =>
+          merged.add(id),
+        );
         onChainIds.forEach((id) => merged.add(id));
         setVerifiedIds(merged);
         persistVerifiedIds(preferredChainId, address, merged);
@@ -427,7 +444,11 @@ export default function LedgerPage() {
 
       let reviewerSignature = challengeData.reviewerSignature || "";
       if (challengeData.signingMode === "client-reviewer") {
-        if (!challengeData.domain || !challengeData.types || !challengeData.value) {
+        if (
+          !challengeData.domain ||
+          !challengeData.types ||
+          !challengeData.value
+        ) {
           throw new Error("Invalid attestation challenge payload");
         }
         reviewerSignature = await signer.signTypedData(
@@ -474,8 +495,8 @@ export default function LedgerPage() {
         typeof error === "object" && error !== null && "shortMessage" in error
           ? String((error as { shortMessage?: string }).shortMessage)
           : error instanceof Error
-            ? error.message
-            : "On-chain verification failed";
+          ? error.message
+          : "On-chain verification failed";
       setVerifyError(message);
     } finally {
       setVerifying(null);
@@ -547,7 +568,8 @@ export default function LedgerPage() {
 
                 {lastRealTxHash && (
                   <div className="border border-[#1b5f4a] bg-[#0f2b22] px-4 py-3 text-xs tracking-wide text-[#9fffd6]">
-                    Real user transaction sent: {lastRealTxHash.slice(0, 14)}...{lastRealTxHash.slice(-10)}
+                    Real user transaction sent: {lastRealTxHash.slice(0, 14)}...
+                    {lastRealTxHash.slice(-10)}
                     <a
                       href={`${txExplorerBase}${lastRealTxHash}`}
                       target="_blank"
@@ -685,11 +707,12 @@ export default function LedgerPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#111]">
-                                      {mergedEntries.map((entry) => {
+                      {mergedEntries.map((entry) => {
                         const isVerified = verifiedIds.has(entry.threat_id);
                         const isVerifying = verifying === entry.threat_id;
-                                        const isWalletTxRow = entry.source_kind === "wallet_tx";
-                        const isAttack = (entry.record_type || "ATTACK") === "ATTACK";
+                        const isWalletTxRow = entry.source_kind === "wallet_tx";
+                        const isAttack =
+                          (entry.record_type || "ATTACK") === "ATTACK";
                         const isAutoBlocked = Boolean(entry.auto_blocked);
 
                         return (
@@ -699,12 +722,16 @@ export default function LedgerPage() {
                           >
                             <td className="px-6 py-4 whitespace-nowrap text-[#aaa]">
                               {(() => {
-                                const ts = formatLedgerTimestamp(entry.timestamp);
+                                const ts = formatLedgerTimestamp(
+                                  entry.timestamp,
+                                );
                                 return (
                                   <div className="leading-tight">
                                     <div>{ts.local}</div>
                                     {ts.utc && (
-                                      <div className="text-[10px] text-[#6f7684]">{ts.utc} UTC</div>
+                                      <div className="text-[10px] text-[#6f7684]">
+                                        {ts.utc} UTC
+                                      </div>
                                     )}
                                   </div>
                                 );
@@ -728,7 +755,9 @@ export default function LedgerPage() {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-[#ccc]">
                               {isWalletTxRow
-                                ? `${entry.ip.slice(0, 8)}...${entry.ip.slice(-6)}`
+                                ? `${entry.ip.slice(0, 8)}...${entry.ip.slice(
+                                    -6,
+                                  )}`
                                 : entry.ip}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
@@ -740,7 +769,9 @@ export default function LedgerPage() {
                                   <span className="text-[10px] text-[#9ea7b5] tracking-wide">
                                     {entry.attack_type}
                                     {typeof entry.confidence === "number"
-                                      ? ` (${Math.round(entry.confidence * 100)}%)`
+                                      ? ` (${Math.round(
+                                          entry.confidence * 100,
+                                        )}%)`
                                       : ""}
                                   </span>
                                 )}
@@ -756,7 +787,10 @@ export default function LedgerPage() {
                               <div className="flex flex-col gap-2">
                                 {isAutoBlocked && (
                                   <div className="text-[#ff6b7a] tracking-widest text-[10px] uppercase">
-                                    AUTO BLOCKED{entry.containment_mode ? ` · ${entry.containment_mode}` : ""}
+                                    AUTO BLOCKED
+                                    {entry.containment_mode
+                                      ? ` · ${entry.containment_mode}`
+                                      : ""}
                                   </div>
                                 )}
 

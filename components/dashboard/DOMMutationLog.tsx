@@ -11,9 +11,54 @@ interface MutationNode {
     type: string
 }
 
-const MUTATION_TYPES = ['MORPH', 'SHIFT', 'CLONE', 'SPLIT', 'MERGE', 'ROTATE', 'INJECT', 'MASK']
+interface ThreatPayload {
+    method?: string
+}
 
-let nodeId = 0
+interface ThreatApiLog {
+    network?: {
+        tier?: string
+    }
+    payloads?: ThreatPayload[]
+}
+
+interface ThreatsApiResponse {
+    stats?: {
+        mutations_total?: number
+    }
+    logs?: ThreatApiLog[]
+}
+
+function methodYOffset(method: string): number {
+    const sum = method.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0)
+    return (sum % 13) - 6
+}
+
+function normalizeMethod(method: string): string {
+    return method.replace(/^eth_/i, '').replace(/_/g, ' ').toUpperCase()
+}
+
+function toMutationNodes(logs: ThreatApiLog[]): MutationNode[] {
+    const recentPayloads = logs
+        .filter((log) => log.network?.tier !== 'HUMAN')
+        .flatMap((log) => (Array.isArray(log.payloads) ? log.payloads : []))
+        .slice(-60)
+
+    return recentPayloads.map((payload, idx) => {
+        const method = String(payload.method || 'unknown')
+        const col = idx % 20
+        const row = Math.floor(idx / 20)
+        const id = idx + 1
+
+        return {
+            id,
+            x: 18 + col * 26,
+            y: 20 + row * 30 + methodYOffset(method),
+            parent: id > 1 ? id - 1 : null,
+            type: normalizeMethod(method),
+        }
+    })
+}
 
 export default function DOMMutationLog() {
     const [today, setToday] = useState(0)
@@ -36,7 +81,7 @@ export default function DOMMutationLog() {
                     headers: { 'Authorization': `Bearer ${token}` }
                 })
                 if (!res.ok) return
-                const data = await res.json()
+                const data = (await res.json()) as ThreatsApiResponse
 
                 if (data.stats && data.stats.mutations_total !== undefined) {
                     const currentMut = data.stats.mutations_total
@@ -62,34 +107,16 @@ export default function DOMMutationLog() {
                         setToday(currentMut)
                         setSession(currentMut - initialMut.current)
 
-                        // Add DNA nodes for each new mutation, capped at 10 to prevent SVG lag storms
-                        const nodesToAdd = Math.min(newMuts, 10)
-                        setNodes(prev => {
-                            const nextNodes = [...prev]
-                            for (let i = 0; i < nodesToAdd; i++) {
-                                const newId = ++nodeId
-                                const parentId = nextNodes.length > 0
-                                    ? nextNodes[Math.max(0, nextNodes.length - 1 - Math.floor(Math.random() * 3))].id
-                                    : null
-                                const x = 20 + (newId % 24) * 22
-                                const branch = Math.floor(newId / 24) % 4
-                                const yBase = 20 + branch * 30
-                                const yJitter = (Math.random() - 0.5) * 12
-                                nextNodes.push({
-                                    id: newId,
-                                    x, y: yBase + yJitter,
-                                    parent: parentId,
-                                    type: MUTATION_TYPES[Math.floor(Math.random() * MUTATION_TYPES.length)]
-                                })
-                            }
-                            return nextNodes.slice(-60)
-                        })
+                        // Render mutation chain from real captured payload methods only.
+                        setNodes(toMutationNodes(Array.isArray(data.logs) ? data.logs : []))
 
                         lastMut.current = currentMut
                     } else {
                         // Decay the rate to 0 if no new mutations
                         setRate(0)
                         prevTime.current = Date.now()
+                        // Still refresh nodes because sessions may change even without aggregate delta.
+                        setNodes(toMutationNodes(Array.isArray(data.logs) ? data.logs : []))
                     }
                 }
             } catch { }

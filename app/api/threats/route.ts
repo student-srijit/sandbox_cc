@@ -1,9 +1,9 @@
 import { NextResponse, NextRequest } from "next/server";
-import { getBotStats } from "@/lib/db";
 import { FASTAPI_URL } from "@/lib/backend-config";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const runtime = "nodejs";
 
 // Server-side token cache — so the public homepage can still fetch real threat data
 // without requiring the user to be logged in.
@@ -33,9 +33,11 @@ type ContainmentStatus = {
 type DashboardResponse = {
   logs?: unknown[];
   stats?: {
+    total?: number;
     taxonomy?: unknown[];
     mutations_total?: number;
     bots?: number;
+    suspicious?: number;
   };
   containment?: ContainmentStatus;
 };
@@ -71,7 +73,13 @@ async function getServerToken(): Promise<string | null> {
 
 export async function GET(request: NextRequest) {
   try {
-    const stats: ThreatStats = getBotStats();
+    const stats: ThreatStats = {
+      total: 0,
+      bots: 0,
+      suspicious: 0,
+      taxonomy: [],
+      mutations_total: 0,
+    };
     let degraded = false;
 
     // Prefer the user's own token; fall back to auto server token
@@ -91,16 +99,22 @@ export async function GET(request: NextRequest) {
         signal: AbortSignal.timeout(1500),
       });
       if (apiRes.ok) {
-        const data: DashboardResponse & { error?: unknown } = await apiRes.json();
+        const data: DashboardResponse & { error?: unknown } =
+          await apiRes.json();
         // Detect JSON-RPC-style 200+error body (backend auth failure fallback)
         if (data && typeof data === "object" && "error" in data) {
           if (userHeader) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+            return NextResponse.json(
+              { error: "Unauthorized" },
+              { status: 401 },
+            );
           }
           degraded = true;
         } else {
           logs = Array.isArray(data.logs) ? data.logs : [];
           if (data.stats) {
+            stats.total =
+              typeof data.stats.total === "number" ? data.stats.total : 0;
             stats.taxonomy = Array.isArray(data.stats.taxonomy)
               ? data.stats.taxonomy
               : [];
@@ -109,7 +123,13 @@ export async function GET(request: NextRequest) {
                 ? data.stats.mutations_total
                 : 0;
             stats.bots =
-              typeof data.stats.bots === "number" ? data.stats.bots : stats.bots;
+              typeof data.stats.bots === "number"
+                ? data.stats.bots
+                : stats.bots;
+            stats.suspicious =
+              typeof data.stats.suspicious === "number"
+                ? data.stats.suspicious
+                : stats.suspicious;
           }
           if (data.containment) {
             containment = data.containment;
