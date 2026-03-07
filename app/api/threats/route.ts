@@ -50,7 +50,7 @@ async function getServerToken(): Promise<string | null> {
   const serviceKey = process.env.BACKEND_SERVICE_KEY;
   if (serviceKey) {
     try {
-      const res = await fetch(`${FASTAPI_URL}/api/auth/service-login`, {
+      const res = await fetchFastAPI(`/api/auth/service-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ service_key: serviceKey }),

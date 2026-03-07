@@ -195,14 +195,6 @@ def _require_bearer(request: Request) -> bool:
         
     token = auth_header.split(" ")[1]
     payload = verify_token(token)
-    
-    # Double-Submit CSRF Verification
-    expected_csrf = payload.get("csrf_token")
-    cookie_csrf = request.cookies.get("bb_csrf_token")
-    
-    if not expected_csrf or not cookie_csrf or expected_csrf != cookie_csrf:
-        raise ValueError("CSRF Check Failed")
-        
     return payload
 
 class LoginRequest(BaseModel):
