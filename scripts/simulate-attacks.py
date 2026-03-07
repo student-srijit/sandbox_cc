@@ -53,7 +53,22 @@ def post(path: str, body: dict, extra_headers: dict | None = None) -> dict | Non
 
 
 def flush():
-    post("/api/flush", {})
+    # Best-effort flush — ignore auth errors since we don't have a user token here
+    body_str = json.dumps({})
+    headers = {
+        "Content-Type": "application/json",
+        **make_hmac_headers(body_str),
+    }
+    req = urllib.request.Request(
+        f"{API_BASE}/api/flush",
+        data=body_str.encode(),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(req, timeout=3)
+    except Exception:
+        pass  # flush is best-effort
 
 
 def delay(ms: int):

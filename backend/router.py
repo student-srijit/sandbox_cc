@@ -549,7 +549,7 @@ async def release_containment(request: Request, wrapper: E2EEWrapper):
     return {"status": "released", "ip": ip}
 
 @router.post("/api/flush")
-async def force_flush():
+async def force_flush(request: Request):
     """Forces the intelligence logger to flush all active dossiers to SQLite."""
     if not _require_bearer(request):
         return _unauthorized(request)
