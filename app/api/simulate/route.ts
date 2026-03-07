@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { FASTAPI_URL } from "@/lib/backend-config";
+import { FASTAPI_URL, fetchFastAPI } from "@/lib/backend-config";
 
 export async function POST() {
   try {
@@ -25,7 +25,7 @@ export async function POST() {
 
     for (let i = 0; i < sequence.length; i += 1) {
       const [method, params] = sequence[i];
-      await fetch(`${FASTAPI_URL}/api/rpc`, {
+      await fetchFastAPI(`/api/rpc`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -38,7 +38,7 @@ export async function POST() {
       });
     }
 
-    const loginRes = await fetch(`${FASTAPI_URL}/api/auth/login`, {
+    const loginRes = await fetchFastAPI(`/api/auth/login`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -66,7 +66,7 @@ export async function POST() {
       );
     }
 
-    await fetch(`${FASTAPI_URL}/api/flush`, {
+    await fetchFastAPI(`/api/flush`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,

@@ -6,11 +6,40 @@ from models import JsonRpcRequest, JsonRpcErrorResponse, JsonRpcError
 from honeypot import honeypot_engine
 from auth import verify_password, create_access_token, verify_token, ADMIN_USER, ADMIN_PASS_HASH
 
+def verify_auth_and_csrf(request: Request) -> dict:
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise ValueError("Unauthorized")
+        
+    token = auth_header.split(" ")[1]
+    payload = verify_token(token)
+    
+    # Double-Submit CSRF Verification
+    expected_csrf = payload.get("csrf_token")
+    cookie_csrf = request.cookies.get("bb_csrf_token")
+    
+    if not expected_csrf or not cookie_csrf or expected_csrf != cookie_csrf:
+        raise ValueError("CSRF Check Failed")
+        
+    return payload
+
 class LoginRequest(BaseModel):
     username: str
     password: str
 
-router = APIRouter()
+from security import decrypt_e2ee_payload, verify_hmac_signature
+from fastapi import APIRouter, Depends
+
+class E2EEPayload(BaseModel):
+    enc_key: str
+    iv: str
+    ciphertext: str
+
+class E2EEWrapper(BaseModel):
+    e2ee_payload: E2EEPayload
+
+# Enforce the Edge-only HMAC signature validation on all endpoints globally
+router = APIRouter(dependencies=[Depends(verify_hmac_signature)])
 
 @router.get("/api/health")
 async def health_check():
@@ -23,14 +52,43 @@ async def system_status():
     return {"status": "syncing", "highestBlock": "0x125a2fa", "currentBlock": "0x125a2fa"}
 
 @router.post("/api/auth/login")
-async def login(credentials: LoginRequest):
+async def login(wrapper: E2EEWrapper, response: Response):
+    try:
+        raw_json_str = decrypt_e2ee_payload(
+            wrapper.e2ee_payload.enc_key,
+            wrapper.e2ee_payload.iv,
+            wrapper.e2ee_payload.ciphertext
+        )
+        credentials_dict = json.loads(raw_json_str)
+        credentials = LoginRequest(**credentials_dict)
+    except Exception as e:
+        return JsonRpcErrorResponse(
+            error=JsonRpcError(code=-32000, message="Unauthorized"), id=None
+        )
+
     if credentials.username != ADMIN_USER or not verify_password(credentials.password, ADMIN_PASS_HASH):
         # Keep consistent JSON-RPC obscure error payload
         return JsonRpcErrorResponse(
             error=JsonRpcError(code=-32000, message="Unauthorized"), id=None
         )
     
-    token = create_access_token({"sub": credentials.username})
+    import secrets
+    csrf_token = secrets.token_urlsafe(32)
+    token = create_access_token({
+        "sub": credentials.username,
+        "csrf_token": csrf_token
+    })
+    
+    # Set the Double-Submit Cookie
+    response.set_cookie(
+        key="bb_csrf_token",
+        value=csrf_token,
+        httponly=True,
+        secure=True,     
+        samesite="lax",
+        max_age=8 * 3600
+    )
+    
     return {"token": token}
 
 @router.get("/api/dashboard/public-stats")
@@ -43,16 +101,11 @@ async def get_public_stats():
 @router.get("/api/dashboard")
 async def get_dashboard_stats(request: Request):
     """
-    Protected endpoint. Requires Bearer token.
+    Protected endpoint. Requires Bearer token + CSRF Cookie.
     Called by the Next.js frontend to populate the Threat Map.
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
-        
-    token = auth_header.split(" ")[1]
     try:
-        verify_token(token)
+        verify_auth_and_csrf(request)
     except ValueError:
         return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
         
@@ -98,20 +151,28 @@ class DefendRequest(BaseModel):
     threat_id: str | None = None  # Optional: associate containment with a specific threat record
 
 @router.post("/api/dashboard/defend")
-async def deploy_active_defense(request: Request, body: DefendRequest):
+async def deploy_active_defense(request: Request, wrapper: E2EEWrapper):
     """
     Protected endpoint. Deploys a retaliation payload against a specific IP.
     Supports legacy modes (TAR_PIT, POISONED_ABI) and new containment playbooks.
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
-        
-    token = auth_header.split(" ")[1]
     try:
-        verify_token(token)
+        verify_auth_and_csrf(request)
     except ValueError:
         return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
+        
+    try:
+        raw_json_str = decrypt_e2ee_payload(
+            wrapper.e2ee_payload.enc_key,
+            wrapper.e2ee_payload.iv,
+            wrapper.e2ee_payload.ciphertext
+        )
+        body_dict = json.loads(raw_json_str)
+        body = DefendRequest(**body_dict)
+    except Exception as e:
+        return JsonRpcErrorResponse(
+             error=JsonRpcError(code=-32602, message="Invalid encrypted payload"), id=None
+        )
 
     from containment import containment, ContainmentMode
     from world_state import manager as ws_manager
@@ -150,13 +211,8 @@ async def get_containment_status(request: Request):
     Protected endpoint. Returns all active containment events and
     whether a CRITICAL_INCIDENT has been declared.
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
-
-    token = auth_header.split(" ")[1]
     try:
-        verify_token(token)
+        verify_auth_and_csrf(request)
     except ValueError:
         return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
 
@@ -165,21 +221,27 @@ async def get_containment_status(request: Request):
 
 
 @router.post("/api/containment/release")
-async def release_containment(request: Request):
+async def release_containment(request: Request, wrapper: E2EEWrapper):
     """
     Protected endpoint. Analyst releases a contained IP (manual override).
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
-
-    token = auth_header.split(" ")[1]
     try:
-        verify_token(token)
+        verify_auth_and_csrf(request)
     except ValueError:
         return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
 
-    body_raw = await request.json()
+    try:
+        raw_json_str = decrypt_e2ee_payload(
+            wrapper.e2ee_payload.enc_key,
+            wrapper.e2ee_payload.iv,
+            wrapper.e2ee_payload.ciphertext
+        )
+        body_raw = json.loads(raw_json_str)
+    except Exception as e:
+        return JsonRpcErrorResponse(
+             error=JsonRpcError(code=-32602, message="Invalid encrypted payload"), id=None
+        )
+
     ip = body_raw.get("ip_address", "")
     if not ip:
         return {"status": "error", "detail": "ip_address required"}
@@ -241,15 +303,10 @@ async def get_session_replay(request: Request, threat_id: str):
     """
     Returns the ordered sequence of RPC payloads for a given threat session,
     enriched with timing deltas so the frontend can replay the attack step by step.
-    Requires Bearer token.
+    Requires Bearer token + CSRF Cookie.
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
-
-    token = auth_header.split(" ")[1]
     try:
-        verify_token(token)
+        verify_auth_and_csrf(request)
     except ValueError:
         return JsonRpcErrorResponse(error=JsonRpcError(code=-32000, message="Unauthorized"), id=None)
 

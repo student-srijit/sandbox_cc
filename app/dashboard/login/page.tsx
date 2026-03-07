@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/components/AuthProvider'
+import { encryptE2EERequest } from '@/lib/security'
 
 export default function LoginPage() {
     const [username, setUsername] = useState('')
@@ -33,10 +34,13 @@ export default function LoginPage() {
         setLoading(true)
 
         try {
+            const rawPayload = JSON.stringify({ username, password })
+            const encryptedPayload = await encryptE2EERequest(rawPayload)
+            
             const res = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ e2ee_payload: encryptedPayload })
             })
 
             const data = await res.json()

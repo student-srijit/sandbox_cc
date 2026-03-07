@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createHmac, randomBytes } from "crypto";
-import { FASTAPI_URL } from "@/lib/backend-config";
+import { FASTAPI_URL, fetchFastAPI } from "@/lib/backend-config";
 
 const MAX_RPC_BODY_BYTES = Number(process.env.MAX_RPC_BODY_BYTES || 65536);
 const TRUST_PROXY_HEADERS = String(process.env.TRUST_PROXY_HEADERS || "false").toLowerCase() === "true";
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
 
     // 2. Proxy the raw JSON-RPC payload to the Live Python Honeypot
     // Pass the threat intelligence down via custom headers
-    const apiRes = await fetch(`${FASTAPI_URL}/api/rpc`, {
+    const apiRes = await fetchFastAPI(`/api/rpc`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
