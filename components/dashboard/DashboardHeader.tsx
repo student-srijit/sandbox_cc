@@ -6,7 +6,7 @@ import { useAuth } from '@/components/AuthProvider'
 export default function DashboardHeader() {
     const [time, setTime] = useState('')
     const [uptime, setUptime] = useState(0)
-    const { logout } = useAuth()
+    const { logout, sessionExpiresAt } = useAuth()
 
     useEffect(() => {
         const tick = () => {
@@ -19,6 +19,15 @@ export default function DashboardHeader() {
     }, [])
 
     const fmtUptime = `${Math.floor(uptime / 3600).toString().padStart(2, '0')}:${Math.floor((uptime % 3600) / 60).toString().padStart(2, '0')}:${(uptime % 60).toString().padStart(2, '0')}`
+
+    // Compute remaining session time live — uptime tick keeps this fresh every second
+    const remaining = sessionExpiresAt ? Math.max(0, sessionExpiresAt - Date.now()) : null
+    const remainingMins = remaining !== null ? Math.floor(remaining / 60000) : null
+    const remainingSecs = remaining !== null ? Math.floor((remaining % 60000) / 1000) : null
+    const fmtRemaining = remainingMins !== null
+        ? `${remainingMins.toString().padStart(2, '0')}:${remainingSecs!.toString().padStart(2, '0')}`
+        : null
+    const isExpiringSoon = remaining !== null && remaining < 5 * 60 * 1000 // < 5 min
 
     return (
         <header className="h-10 flex items-center px-4 gap-6 border-b border-[#1a1a1a] bg-black flex-shrink-0">
@@ -51,11 +60,24 @@ export default function DashboardHeader() {
                 <span className="text-[#777]">
                     UPTIME {fmtUptime}
                 </span>
+
+                {/* Session countdown */}
+                {fmtRemaining && (
+                    <span className={`flex items-center gap-1.5 font-mono ${
+                        isExpiringSoon ? 'text-[#FF2020] animate-pulse' : 'text-[#888]'
+                    }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                            isExpiringSoon ? 'bg-[#FF2020]' : 'bg-[#555]'
+                        }`} />
+                        SESSION {fmtRemaining}
+                    </span>
+                )}
+
                 <button
                     onClick={logout}
-                    className="text-[9px] text-[#444] hover:text-[#FF2020] tracking-widest uppercase transition-colors border border-[#222] hover:border-[#FF2020]/40 px-2 py-1"
+                    className="text-[9px] text-[#FF2020]/60 hover:text-[#FF2020] tracking-widest uppercase transition-colors border border-[#FF2020]/20 hover:border-[#FF2020]/60 bg-[#FF2020]/5 hover:bg-[#FF2020]/10 px-2 py-1"
                 >
-                    LOGOUT
+                    TERMINATE SESSION
                 </button>
             </div>
         </header>

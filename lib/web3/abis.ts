@@ -2,17 +2,30 @@ export const REPORT_ACCESS_NFT_ABI = [
   "function pricing(bytes32 reportId) view returns (uint256 nativePrice, uint256 stablePrice, bool enabled)",
   "function buyWithNative(bytes32 reportId, address to) payable returns (uint256 tokenId)",
   "function buyWithStable(bytes32 reportId, address to) returns (uint256 tokenId)",
+  "function balanceOf(address owner) view returns (uint256)",
+  "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
+  "event ReportBought(bytes32 indexed reportId, address indexed buyer, uint256 tokenId)",
 ] as const;
 
 export const ENTERPRISE_LICENSE_NFT_ABI = [
   "function plans(bytes32 planId) view returns (uint256 nativePrice, uint256 stablePrice, uint64 durationSeconds, bool enabled)",
   "function buyWithNative(bytes32 planId, address to, uint32 seats) payable returns (uint256 tokenId)",
   "function buyWithStable(bytes32 planId, address to, uint32 seats) returns (uint256 tokenId)",
+  "function balanceOf(address owner) view returns (uint256)",
+  "event LicenseMinted(bytes32 indexed planId, address indexed buyer, uint256 tokenId, uint32 seats, uint64 expiresAt)",
 ] as const;
 
 export const BOUNTY_ESCROW_ABI = [
+  // Write
   "function createNativeBounty(uint64 deadline) payable returns (uint256 bountyId)",
   "function createTokenBounty(address token, uint256 amount, uint64 deadline) returns (uint256 bountyId)",
+  "function submitClaim(uint256 bountyId, string cid, bytes32 contentHash)",
+  "function approveClaim(uint256 bountyId)",
+  "function refundBounty(uint256 bountyId)",
+  // Read
+  "function nextBountyId() view returns (uint256)",
+  "function bounties(uint256 id) view returns (address creator, address token, uint256 amount, uint64 deadline, uint8 state)",
+  "function claims(uint256 id) view returns (address hunter, string cid, bytes32 contentHash, bool exists)",
 ] as const;
 
 export const EVIDENCE_ATTESTATION_ABI = [

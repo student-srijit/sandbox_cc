@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from database import init_db
-from router import router
+from router import router, open_router
 from world_state import manager
 from network_defense import ActiveDefenseMiddleware
 
@@ -129,6 +129,10 @@ async def add_process_time_header(request: Request, call_next):
 
 # 3. Mount Routes
 app.include_router(router)
+# Public honeypot-facing routes — no HMAC required (attacker-visible).
+# Must be included AFTER the protected router so specific /api/* routes
+# are matched first; the catch-all /{full_path:path} only fires last.
+app.include_router(open_router)
 
 if __name__ == "__main__":
     import uvicorn

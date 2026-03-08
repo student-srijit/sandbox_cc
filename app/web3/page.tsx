@@ -51,6 +51,12 @@ export default function Web3HubPage() {
             >
               Open Ledger
             </Link>
+            <Link
+              href="/marketplace"
+              className="rounded border border-[#5a3e8a] bg-[#1a1030] px-4 py-2 text-[11px] tracking-[0.2em] uppercase text-[#c084fc] hover:bg-[#221440]"
+            >
+              Threat Marketplace
+            </Link>
           </div>
         </div>
 

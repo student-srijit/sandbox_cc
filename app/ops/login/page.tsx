@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useOpsAuth } from '@/components/OpsAuthProvider'
+import { encryptE2EERequest } from '@/lib/security'
 
 export default function OpsLoginPage() {
     const [username, setUsername] = useState('')
@@ -33,22 +34,26 @@ export default function OpsLoginPage() {
         setLoading(true)
 
         try {
-            const body: Record<string, string> = { username, password }
-            if (totpCode) body.totp_code = totpCode
+            // Always use E2EE — backend only accepts encrypted payloads
+            const payload: Record<string, string> = { username, password }
+            if (totpCode) payload.totp_code = totpCode
+
+            const encryptedPayload = await encryptE2EERequest(JSON.stringify(payload))
 
             const res = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
+                body: JSON.stringify({ e2ee_payload: encryptedPayload }),
             })
 
             const data = await res.json()
 
             if (!res.ok || data.error) {
                 if (data.error === 'totp_required') {
-                    setError('Enter your 6-digit authenticator code below')
+                    setError('Enter your 6-digit authenticator code below and submit again')
                 } else if (data.error === 'invalid_totp') {
-                    setError('Invalid authenticator code — try again')
+                    setError('Invalid authenticator code — check your app and try again')
+                    setTotpCode('')
                 } else {
                     setError('Unauthorized credentials')
                 }
@@ -61,8 +66,8 @@ export default function OpsLoginPage() {
             }
         } catch {
             setError('Authentication subsystem offline')
-            setLoading(false)
         }
+        setLoading(false)
     }
 
     return (
@@ -82,13 +87,13 @@ export default function OpsLoginPage() {
                 </div>
 
                 <form onSubmit={handleSubmit} className="bg-[#030303] border border-[#222] p-8 relative">
-                    <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-[#00FFD1]"></div>
-                    <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-[#00FFD1]"></div>
-                    <div className="absolute bottom-0 left-0 w-2 h-2 border-b border-l border-[#00FFD1]"></div>
-                    <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-[#00FFD1]"></div>
+                    <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-[#00FFD1]" />
+                    <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-[#00FFD1]" />
+                    <div className="absolute bottom-0 left-0 w-2 h-2 border-b border-l border-[#00FFD1]" />
+                    <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-[#00FFD1]" />
 
                     <div className="mb-6 text-center text-[10px] tracking-widest text-[#00FFD1] flex flex-col items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-[#00FFD1] animate-pulse"></span>
+                        <span className="w-2 h-2 rounded-full bg-[#00FFD1] animate-pulse" />
                         {activeSessions} ACTIVE THREAT SESSIONS
                     </div>
 
@@ -101,6 +106,7 @@ export default function OpsLoginPage() {
                             className="w-full bg-[#0a0a0a] border border-[#333] text-[#00FFD1] px-4 py-3 text-sm tracking-widest outline-none focus:border-[#00FFD1]"
                             required
                             autoComplete="username"
+                            autoFocus
                         />
                         <input
                             type="password"

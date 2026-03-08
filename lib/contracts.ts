@@ -8,21 +8,23 @@ export type ContractSet = {
   stableToken: string;
 };
 
-// Fill with deployed addresses after running web3 deployment scripts.
+// Deployed addresses from scripts/web3/ — kept here as fallback when env vars aren't set.
 export const CONTRACTS_BY_CHAIN: Record<SupportedChain, ContractSet> = {
+  // Sepolia — deployed 2026-03-07
   11155111: {
-    evidenceAttestation: "",
-    reportAccessNFT: "",
-    enterpriseLicenseNFT: "",
-    bountyEscrow: "",
-    stableToken: "",
+    evidenceAttestation: "0xcD9733D4eC3B007187E27DdB37F0B533165afa9a",
+    reportAccessNFT:     "0xfEc8072a21489EE832B87b5dfDD60f9fF413Be75",
+    enterpriseLicenseNFT:"0x0ffFb771Ec41Ac7cE7A17f0c263e4B875fcB73eB",
+    bountyEscrow:        "0x56280229FEbEfD81F91D9CaEEaafed8dfcf4B64e",
+    stableToken:         "0xcD9733D4eC3B007187E27DdB37F0B533165afa9a",
   },
+  // Celo Sepolia — deployed 2026-03-07
   11142220: {
-    evidenceAttestation: "",
-    reportAccessNFT: "",
-    enterpriseLicenseNFT: "",
-    bountyEscrow: "",
-    stableToken: "",
+    evidenceAttestation: "0xfEc8072a21489EE832B87b5dfDD60f9fF413Be75",
+    reportAccessNFT:     "0x0ffFb771Ec41Ac7cE7A17f0c263e4B875fcB73eB",
+    enterpriseLicenseNFT:"0x56280229FEbEfD81F91D9CaEEaafed8dfcf4B64e",
+    bountyEscrow:        "0xE1D41D8cff64AD6F75D4Dedd15aFbe0dD5f73039",
+    stableToken:         "0xcD9733D4eC3B007187E27DdB37F0B533165afa9a",
   },
 };
 

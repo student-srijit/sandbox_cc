@@ -49,3 +49,11 @@ backend/.env
 .env
 
 data/telemetry.json
+
+# Runtime logs and test artifacts
+*.log
+*.err
+testout.txt
+scripts/check_*.py
+scripts/get_token.py
+scripts/test_all_tcs.py

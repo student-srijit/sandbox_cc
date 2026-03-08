@@ -58,6 +58,7 @@ export function useWallet() {
 }
 
 const PREFERRED_CHAIN_STORAGE_KEY = "bb-preferred-chain";
+const WALLET_CONNECTED_KEY = "bb-wallet-connected";
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
@@ -206,12 +207,47 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
         // 6. Notify the Backend telemetry that a legitimate node was protected
         fetch("/api/protect", { method: "POST" }).catch(() => {});
+
+        // 7. Persist connected flag so auto-reconnect can restore state after reloads
+        window.localStorage.setItem(WALLET_CONNECTED_KEY, "1");
       } catch (err) {
         console.error("Error connecting wallet:", err);
       }
     },
     [preferredChainId, setPreferredChainId, switchChain],
   );
+
+  // Silent auto-reconnect on mount — restores wallet without showing MetaMask popup
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const wasConnected = window.localStorage.getItem(WALLET_CONNECTED_KEY);
+    if (!wasConnected) return;
+    const eth = (window as WindowWithEthereum).ethereum;
+    if (!eth) return;
+
+    (async () => {
+      try {
+        // eth_accounts is silent — returns already-authorized accounts, no popup
+        const accounts = (await eth.request({ method: "eth_accounts" })) as string[];
+        if (!accounts || accounts.length === 0) {
+          // User revoked access in MetaMask — clear flag
+          window.localStorage.removeItem(WALLET_CONNECTED_KEY);
+          return;
+        }
+        const provider = new ethers.BrowserProvider(eth);
+        const network = await provider.getNetwork();
+        const balanceWei = await provider.getBalance(accounts[0]);
+        const balanceEth = parseFloat(ethers.formatEther(balanceWei)).toFixed(4);
+        setAddress(accounts[0]);
+        setBalance(balanceEth);
+        setChainId(Number(network.chainId));
+        setIsActive(true);
+      } catch {
+        // silently ignore — wallet might not be unlocked yet
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Handle account/chain changes
   useEffect(() => {
@@ -231,14 +267,32 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         setIsActive(false);
         setAddress(null);
         setBalance(null);
+        window.localStorage.removeItem(WALLET_CONNECTED_KEY);
       } else {
         // Just reconnect to fetch new balances
         connectWallet();
       }
     };
 
-    const handleChainChanged = () => {
-      window.location.reload();
+    const handleChainChanged = async () => {
+      // Re-read state in place instead of full page reload which wipes wallet context
+      const eth2 = (window as WindowWithEthereum).ethereum;
+      if (!eth2) return;
+      try {
+        const accounts = (await eth2.request({ method: "eth_accounts" })) as string[];
+        if (!accounts || accounts.length === 0) return;
+        const provider2 = new ethers.BrowserProvider(eth2);
+        const network2 = await provider2.getNetwork();
+        const balanceWei2 = await provider2.getBalance(accounts[0]);
+        const balanceEth2 = parseFloat(ethers.formatEther(balanceWei2)).toFixed(4);
+        setAddress(accounts[0]);
+        setBalance(balanceEth2);
+        setChainId(Number(network2.chainId));
+        setIsActive(true);
+      } catch {
+        // fallback: reload only if we truly can't recover
+        window.location.reload();
+      }
     };
 
     eth.on("accountsChanged", handleAccountsChanged);

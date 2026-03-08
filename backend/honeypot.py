@@ -204,8 +204,7 @@ class HoneypotEngine:
                 confidence=1.0
             )
             if session_id not in intel_logger.active_threats:
-                effective_tier = self._normalize_tier(tier, 100, forced_class.attack_type)
-                intel_logger.init_session(session_id, ip, "UNKNOWN", 100, effective_tier, forced_class)
+                intel_logger.init_session(session_id, ip, "UNKNOWN", 100, tier, forced_class)
                 
             intel_logger.record_payload(session_id, "GET " + path, "", "PATH_TRAVERSAL")
             

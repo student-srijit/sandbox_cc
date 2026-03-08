@@ -56,24 +56,24 @@ export default function Topbar() {
 
       {/* Right: Wallet & Shield */}
       <div className="flex items-center gap-6">
-        <a
+        <Link
           href="/web3"
           className="text-[9px] text-[#7ec8ff] hover:text-white tracking-[0.2em] uppercase font-mono transition-colors border border-[rgba(126,200,255,0.35)] bg-[rgba(126,200,255,0.08)] px-3 py-1.5 rounded-sm"
         >
           WEB3 HUB
-        </a>
-        <a
+        </Link>
+        <Link
           href="/vault"
           className="text-[9px] text-[#00FF41] hover:text-white tracking-[0.2em] font-bold transition-all border border-[#00FF41] bg-[#00FF41]/10 shadow-[0_0_10px_rgba(0,255,65,0.2)] px-4 py-2 uppercase"
         >
           Launch Vault
-        </a>
-        <a
+        </Link>
+        <Link
           href="/ledger"
           className="text-[9px] text-[var(--accent-magenta)] hover:text-white tracking-[0.2em] uppercase font-mono transition-colors border border-[rgba(255,0,255,0.2)] bg-[rgba(255,0,255,0.05)] px-3 py-1.5 rounded-sm"
         >
           IMMUTABLE LEDGER
-        </a>
+        </Link>
         {isActive && address && (
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-[rgba(0,255,209,0.3)] bg-[rgba(0,255,209,0.05)] shadow-[0_0_15px_rgba(0,255,209,0.1)] transition-all">
             <div className="w-1.5 h-1.5 rounded-full bg-[#00FFD1] shadow-[0_0_5px_#00FFD1] animate-pulse" />

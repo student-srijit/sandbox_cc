@@ -111,7 +111,7 @@ class WorldStateManager:
     def deploy_defense(self, ip_address: str, defense_type: str):
         """Activates a specific offensive countermeasure against an IP."""
         self.active_defenses[ip_address] = defense_type
-        print(f"🚨 ACTIVE DEFENSE DEPLOYED: {defense_type} against {ip_address}")
+        print(f"[DEFENSE] ACTIVE DEFENSE DEPLOYED: {defense_type} against {ip_address}")
 
     def cleanup_expired(self, max_age_seconds: int = 7200):
         """Removes sessions older than 2 hours to prevent OOM."""

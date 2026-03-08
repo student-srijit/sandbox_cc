@@ -53,6 +53,8 @@ _rate_buckets_lock = threading.Lock()
 _ip_bans: dict[str, float] = {}       # IP -> ban expiry timestamp
 _ip_ban_strikes: dict[str, int] = {}  # IP -> cumulative strike count
 _ip_bans_lock = threading.Lock()
+_revoked_tokens: set[str] = set()      # revoked JWT signatures (cleared on restart)
+_revoked_tokens_lock = threading.Lock()
 
 AUDIT_DIR = Path(__file__).parent / "data"
 AUDIT_LOG_PATH = AUDIT_DIR / "security_audit.log"
@@ -151,6 +153,9 @@ def _ip_ban_auto(request: Optional[Request], ip: str, strikes: int):
 def _check_ip_banned_response(request: Request) -> Optional[JSONResponse]:
     """Returns a 403 response if the requesting IP is currently banned, else None."""
     ip = _extract_client_ip(request, dict(request.headers))
+    # Never ban the loopback address — that's our own Next.js proxy talking to us.
+    if ip in ("127.0.0.1", "::1"):
+        return None
     banned, remaining = _check_ip_banned(ip)
     if banned:
         _audit_event("ip.blocked", request, "denied", {"remaining_seconds": round(remaining, 1)})
@@ -171,17 +176,22 @@ def _rate_limited(request: Optional[Request], scope: str):
     """Records a rate-limit violation, increments fail2ban strike count, and auto-bans repeat offenders."""
     if request is not None:
         ip = _extract_client_ip(request, dict(request.headers))
-        with _ip_bans_lock:
-            _ip_ban_strikes[ip] = _ip_ban_strikes.get(ip, 0) + 1
-            strikes = _ip_ban_strikes[ip]
-        if strikes >= IP_BAN_THRESHOLD_STRIKES:
-            _ip_ban_auto(request, ip, strikes)
+        # Never accumulate strikes for loopback — that's our own Next.js proxy.
+        if ip not in ("127.0.0.1", "::1"):
+            with _ip_bans_lock:
+                _ip_ban_strikes[ip] = _ip_ban_strikes.get(ip, 0) + 1
+                strikes = _ip_ban_strikes[ip]
+            if strikes >= IP_BAN_THRESHOLD_STRIKES:
+                _ip_ban_auto(request, ip, strikes)
     _audit_event("rate.limit", request, "denied", {"scope": scope})
     return JSONResponse(status_code=429, content={"error": "Rate limit exceeded"})
 
 
 def _enforce_admin_rate_limit(request: Request, scope: str) -> Optional[JSONResponse]:
     ip = _extract_client_ip(request, dict(request.headers))
+    # Loopback is our own Next.js proxy — never rate-limit it.
+    if ip in ("127.0.0.1", "::1"):
+        return None
     key = f"admin:{scope}:{ip}"
     if _is_rate_limited(key, ADMIN_RATE_LIMIT_MAX_REQUESTS, ADMIN_RATE_LIMIT_WINDOW_SECONDS):
         return _rate_limited(request, scope)
@@ -236,8 +246,11 @@ def _require_bearer(request: Request) -> bool:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
-        
+
     token = auth_header.split(" ")[1]
+    with _revoked_tokens_lock:
+        if token in _revoked_tokens:
+            raise HTTPException(status_code=401, detail="Token revoked")
     try:
         payload = verify_token(token)
     except ValueError as e:
@@ -268,6 +281,11 @@ class E2EEWrapper(BaseModel):
 # Enforce the Edge-only HMAC signature validation on all endpoints globally
 router = APIRouter(dependencies=[Depends(verify_hmac_signature)])
 
+# Open router — NO auth required.
+# Honeypot-facing routes: /.env, /.git/config, /admin, etc.
+# Real attackers do not have the HMAC secret, so these MUST be unauthenticated.
+open_router = APIRouter()
+
 @router.get("/api/health")
 async def health_check():
     """Returns absolute minimal data to prevent fingerprinting the honeypot."""
@@ -279,7 +297,8 @@ async def system_status():
     return {"status": "syncing", "highestBlock": "0x125a2fa", "currentBlock": "0x125a2fa"}
 
 @router.post("/api/auth/login")
-async def login(credentials: LoginRequest, request: Request):
+async def login(wrapper: E2EEWrapper, request: Request):
+    """Admin login. Accepts E2EE-encrypted {username, password, totp_code?}. Issues a 30-min JWT."""
     ban_resp = _check_ip_banned_response(request)
     if ban_resp:
         return ban_resp
@@ -289,12 +308,31 @@ async def login(credentials: LoginRequest, request: Request):
     if _is_rate_limited(login_key, LOGIN_RATE_LIMIT_MAX_ATTEMPTS, LOGIN_RATE_LIMIT_WINDOW_SECONDS):
         return _rate_limited(request, "login")
 
-    if credentials.username != ADMIN_USER or not verify_password(credentials.password, ADMIN_PASS_HASH):
+    # Decrypt E2EE payload — frontend always sends {e2ee_payload: {enc_key, iv, ciphertext}}
+    try:
+        raw_str = decrypt_e2ee_payload(
+            wrapper.e2ee_payload.enc_key,
+            wrapper.e2ee_payload.iv,
+            wrapper.e2ee_payload.ciphertext,
+        )
+        body_raw = json.loads(raw_str)
+    except Exception:
+        _audit_event("admin.login", request, "denied", {"reason": "e2ee_decrypt_failed"})
+        return JSONResponse(status_code=400, content={"error": "Invalid request"})
+
+    username = str(body_raw.get("username", ""))[:64]
+    password = str(body_raw.get("password", ""))[:256]
+    totp_code = body_raw.get("totp_code")
+
+    if not username or not password:
+        return JSONResponse(status_code=400, content={"error": "Missing credentials"})
+
+    if username != ADMIN_USER or not verify_password(password, ADMIN_PASS_HASH):
         _audit_event(
             "admin.login",
             request,
             "denied",
-            {"reason": "invalid_credentials", "username": credentials.username[:64]},
+            {"reason": "invalid_credentials", "username": username},
         )
         return JsonRpcErrorResponse(
             error=JsonRpcError(code=-32000, message="Unauthorized"), id=None
@@ -302,7 +340,7 @@ async def login(credentials: LoginRequest, request: Request):
 
     # TOTP verification — skipped when TOTP_SECRET is not configured (dev / service accounts)
     if TOTP_SECRET:
-        if not credentials.totp_code:
+        if not totp_code:
             _audit_event("admin.totp", request, "denied", {"reason": "missing_totp_code"})
             return JSONResponse(
                 status_code=401,
@@ -310,7 +348,7 @@ async def login(credentials: LoginRequest, request: Request):
             )
         try:
             import pyotp
-            if not pyotp.TOTP(TOTP_SECRET).verify(str(credentials.totp_code), valid_window=1):
+            if not pyotp.TOTP(TOTP_SECRET).verify(str(totp_code), valid_window=1):
                 _audit_event("admin.totp", request, "denied", {"reason": "invalid_totp_code"})
                 return JSONResponse(
                     status_code=401,
@@ -319,11 +357,40 @@ async def login(credentials: LoginRequest, request: Request):
         except ImportError:
             pass  # pyotp not installed — skip TOTP check gracefully
 
-    token = create_access_token({"sub": credentials.username})
-    _audit_event("admin.login", request, "granted", {"username": credentials.username[:64]})
+    # Issue a 30-minute JWT — backend enforces the same window as the frontend countdown
+    token = create_access_token({"sub": username}, expires_delta_seconds=30 * 60)
+    _audit_event("admin.login", request, "granted", {"username": username})
     if TOTP_SECRET:
         _audit_event("admin.totp", request, "granted", {})
     return {"token": token}
+
+
+@router.post("/api/auth/logout")
+async def admin_logout(request: Request):
+    """Revokes the caller's JWT immediately and writes an audit event."""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        with _revoked_tokens_lock:
+            _revoked_tokens.add(token)
+            # Prune already-expired tokens to keep the set small
+            now = int(time.time())
+            import json as _json
+            from auth import b64url_decode as _b64d
+            keep: set[str] = set()
+            for t in _revoked_tokens:
+                try:
+                    parts = t.split(".")
+                    if len(parts) == 3:
+                        payload = _json.loads(_b64d(parts[1]).decode())
+                        if int(payload.get("exp", 0)) > now:
+                            keep.add(t)
+                except Exception:
+                    pass
+            _revoked_tokens.clear()
+            _revoked_tokens.update(keep)
+    _audit_event("admin.logout", request, "granted", {})
+    return {"status": "ok"}
 
 
 @router.post("/api/auth/service-login")
@@ -473,6 +540,27 @@ async def deploy_active_defense(request: Request, wrapper: E2EEWrapper):
     from containment import containment, ContainmentMode
     from world_state import manager as ws_manager
 
+    # Decrypt E2EE payload
+    try:
+        plaintext = decrypt_e2ee_payload(
+            wrapper.e2ee_payload.enc_key,
+            wrapper.e2ee_payload.iv,
+            wrapper.e2ee_payload.ciphertext,
+        )
+        body_dict = json.loads(plaintext)
+    except Exception as e:
+        return JsonRpcErrorResponse(
+            error=JsonRpcError(code=-32600, message=f"E2EE decryption failed: {e}"),
+            id=None,
+        )
+
+    class _Body:
+        defense_type = body_dict.get("defense_type", "")
+        ip_address = body_dict.get("ip_address", "")
+        threat_id = body_dict.get("threat_id", "")
+
+    body = _Body()
+
     # Normalise and validate the requested mode
     try:
         mode = ContainmentMode(body.defense_type)
@@ -487,7 +575,7 @@ async def deploy_active_defense(request: Request, wrapper: E2EEWrapper):
         ip=body.ip_address,
         mode=mode,
         threat_id=body.threat_id,
-        reason=f"Manual deployment by analyst via dashboard",
+        reason="Manual deployment by analyst via dashboard",
     )
     # Keep legacy world_state map in sync for TAR_PIT and POISONED_ABI
     if mode in (ContainmentMode.TAR_PIT, ContainmentMode.POISONED_ABI):
@@ -499,7 +587,7 @@ async def deploy_active_defense(request: Request, wrapper: E2EEWrapper):
         "success",
         {"ip_address": body.ip_address, "mode": mode.value, "threat_id": body.threat_id},
     )
-    
+
     return {
         "status": "deployed",
         "ip": body.ip_address,
@@ -534,6 +622,12 @@ async def release_containment(request: Request, wrapper: E2EEWrapper):
     limited = _enforce_admin_rate_limit(request, "containment_release")
     if limited:
         return limited
+
+    from security import decrypt_e2ee_payload
+    try:
+        body_raw = decrypt_e2ee_payload(wrapper.enc_key, wrapper.iv, wrapper.ciphertext)
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": f"E2EE decryption failed: {e}"})
 
     ip = body_raw.get("ip_address", "")
     if not ip:
@@ -892,7 +986,8 @@ def _build_gzip_bomb() -> bytes:
     Generates the compressed payload once (lazy, on first attacker hit).
     ~50 MB of fake credential data compressed at level 9 → ~40–60 KB on wire.
     """
-    # Convincing-looking credential noise scanners will try to parse
+    # Convincing-looking credential noise scanners will try to parse.
+    # Each base line-group is ~329 bytes; 60 × 2600 = 156,000 reps ≈ 51 MB raw.
     pattern = (
         "# Production Environment — DO NOT COMMIT\n"
         "DB_HOST=10.0.0.1\nDB_PORT=5432\nDB_USER=postgres\n"
@@ -900,13 +995,13 @@ def _build_gzip_bomb() -> bytes:
         "SECRET_KEY=" + "a" * 64 + "\n"
         "AWS_ACCESS_KEY_ID=AKIA" + "B" * 16 + "\n"
         "AWS_SECRET_ACCESS_KEY=" + "C" * 40 + "\n\n"
-    ) * 60  # ~360 KB per block
-    raw_bytes = (pattern * 140).encode("utf-8")  # ~50 MB uncompressed
+    ) * 60  # ~19 KB per block
+    raw_bytes = (pattern * 2600).encode("utf-8")  # ~50 MB uncompressed
     buf = io.BytesIO()
     with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=9) as gz:
         gz.write(raw_bytes)
     compressed = buf.getvalue()
-    _router_logger.info(
+    logger.info(
         "gzip bomb ready: %d bytes compressed / ~50 MB decompressed",
         len(compressed),
     )
@@ -1000,24 +1095,28 @@ async def _handle_canary(full_path: str, request: Request):
     return Response(content=body, status_code=200, media_type="text/plain")
 
 
-@router.get("/{full_path:path}")
+@open_router.get("/{full_path:path}")
 async def catch_all_get(full_path: str, request: Request, response: Response):
     """
-    Catches ALL non-RPC requests like `/.env` or `/admin` 
-    and checks if they are known attack probes. We also
-    check for active active-defenses for scanners.
+    Catches ALL non-RPC/API requests like `/.env` or `/admin`.
+    No HMAC required — this is the honeypot surface for real attackers.
     """
     headers = dict(request.headers)
-    tier = headers.get("x-bb-tier", "UNKNOWN")
+    tier = headers.get("x-bb-tier", "BOT")  # assume adversarial on catch-all
     session_id = headers.get("x-bb-session", request.client.host if request.client else "unknown-ip")
     ip = _extract_client_ip(request, headers)
-    
+
+    # Check canary paths first for richer fake responses + auto-containment
+    norm = f"/{full_path}".rstrip("/") or "/"
+    if norm in _CANARY_PATHS or (norm + "/") in _CANARY_PATHS:
+        return await _handle_canary(full_path, request)
+
     fake_response = await honeypot_engine.handle_static_probe(
-        f"/{full_path}", session_id, tier, ip
+        norm, session_id, tier, ip
     )
-    
+
     if fake_response != "Not found":
         response.headers["Content-Type"] = "text/plain"
         return fake_response
-        
+
     raise HTTPException(status_code=404, detail="Not Found")
