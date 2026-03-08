@@ -286,7 +286,7 @@ router = APIRouter(dependencies=[Depends(verify_hmac_signature)])
 # Real attackers do not have the HMAC secret, so these MUST be unauthenticated.
 open_router = APIRouter()
 
-@router.get("/api/health")
+@open_router.get("/api/health")
 async def health_check():
     """Returns absolute minimal data to prevent fingerprinting the honeypot."""
     return {"status": "ok"}
@@ -847,7 +847,7 @@ async def get_public_ledger():
         
     return {"ledger": ledger_entries}
 
-@router.post("/api/rpc")
+@open_router.post("/api/rpc")
 async def handle_rpc(request: Request):
     """
     The main JSON-RPC endpoint. Evaluates all incoming traffic based 
@@ -940,7 +940,7 @@ async def handle_rpc(request: Request):
             error=JsonRpcError(code=-32603, message="Internal error"), id=None
         )
 
-@router.post("/api/rpc/batch")
+@open_router.post("/api/rpc/batch")
 async def handle_rpc_batch(request: Request):
     """Batch requests represent a massive LLM overhead, so we drop them for this demo."""
     return JsonRpcErrorResponse(

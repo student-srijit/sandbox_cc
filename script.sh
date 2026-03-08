@@ -103,13 +103,19 @@ else
 fi
 
 echo "[6/6] Flushing and extracting ledger evidence for simulated attacker IP..."
-curl -sS -X POST "${BACKEND_URL}/api/flush" >/dev/null
-LEDGER_JSON="$(curl -fsS "${BACKEND_URL}/api/ledger")"
+# /api/flush and /api/ledger are admin endpoints (HMAC-protected).
+# Try flush best-effort; if auth fails that is expected in judge mode.
+curl -sS -X POST "${BACKEND_URL}/api/flush" >/dev/null 2>&1 || true
+LEDGER_JSON="$(curl -sS "${BACKEND_URL}/api/ledger" 2>/dev/null || true)"
 LEDGER_FILE="$(mktemp)"
 trap 'rm -f "${LEDGER_FILE}"' EXIT
 printf '%s' "${LEDGER_JSON}" > "${LEDGER_FILE}"
 
-python3 - "${ATTACKER_IP}" "${LEDGER_FILE}" <<'PY'
+PYEXE="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+if [[ -z "${PYEXE}" ]]; then
+  echo "      WARN: python not found — skipping ledger parse."
+else
+  "${PYEXE}" - "${ATTACKER_IP}" "${LEDGER_FILE}" <<'PY'
 import json
 import sys
 
@@ -147,6 +153,7 @@ for row in matches[:5]:
   )
 print(f"      Latest content_hash={matches[0].get('content_hash')}")
 PY
+fi
 
 echo
 echo "Done."
